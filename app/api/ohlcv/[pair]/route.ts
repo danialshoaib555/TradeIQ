@@ -15,16 +15,31 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ pair
     const daysMap: Record<string, number> = { '5m': 1, '15m': 1, '1h': 1, '4h': 7, '1D': 30 };
     const rangeMap: Record<string, string> = { '5m': '5d', '15m': '5d', '1h': '1mo', '4h': '3mo', '1D': '1y' };
 
-    if (pair.market === 'crypto' && pair.binanceSymbol) {
-      ohlcv = await fetchBinanceOHLCV(pair.binanceSymbol, ivMap[tf] ?? '1h', 150);
-    } else if (pair.market === 'crypto' && pair.coinGeckoId) {
-      ohlcv = await fetchCryptoOHLCV(pair.coinGeckoId, daysMap[tf] ?? 1);
+    if (pair.market === 'crypto') {
+      // Try Binance first, fall back to CoinGecko on any error (Binance is blocked in some regions)
+      if (pair.binanceSymbol) {
+        try {
+          ohlcv = await fetchBinanceOHLCV(pair.binanceSymbol, ivMap[tf] ?? '1h', 150);
+          if (!Array.isArray(ohlcv) || ohlcv.length === 0) throw new Error('empty');
+        } catch {
+          if (pair.coinGeckoId) {
+            ohlcv = await fetchCryptoOHLCV(pair.coinGeckoId, Math.max(daysMap[tf] ?? 1, 7));
+          }
+        }
+      } else if (pair.coinGeckoId) {
+        ohlcv = await fetchCryptoOHLCV(pair.coinGeckoId, Math.max(daysMap[tf] ?? 1, 7));
+      }
     } else if ((pair.market === 'forex' || pair.market === 'commodities') && pair.base && pair.quote) {
-      ohlcv = await fetchForexOHLCV(pair.base, pair.quote, 60);
+      // Fetch 90 days to get enough candles for reliable indicator calculations
+      ohlcv = await fetchForexOHLCV(pair.base, pair.quote, 90);
     } else if (pair.market === 'stocks' && pair.ticker) {
       ohlcv = await fetchStockOHLCV(pair.ticker, ivMap[tf] ?? '1d', rangeMap[tf] ?? '1mo');
     } else {
       return NextResponse.json({ error: 'Unsupported pair' }, { status: 400 });
+    }
+
+    if (!ohlcv || !Array.isArray(ohlcv) || ohlcv.length === 0) {
+      return NextResponse.json({ error: 'No data available' }, { status: 503 });
     }
 
     return NextResponse.json(ohlcv, {

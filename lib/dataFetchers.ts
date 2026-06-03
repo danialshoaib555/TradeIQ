@@ -20,16 +20,22 @@ export async function fetchForexOHLCV(base: string, quote: string, days = 30): P
   if (!res.ok) throw new Error(`Frankfurter: ${res.status}`);
   const data = await res.json();
   const entries = Object.entries(data.rates as Record<string, Record<string, number>>);
-  return entries.map(([date, rates]) => {
-    const close = rates[quote];
-    return {
-      time: Math.floor(new Date(date).getTime() / 1000),
-      open:  close * (1 + (Math.random() - 0.5) * 0.002),
-      high:  close * (1 + Math.random() * 0.005),
-      low:   close * (1 - Math.random() * 0.005),
-      close,
-      volume: Math.floor(Math.random() * 1000000),
-    };
+  // Build realistic candles: use prev close as open, derive high/low from daily range estimate
+  const closes = entries.map(([date, rates]) => ({
+    time: Math.floor(new Date(date).getTime() / 1000),
+    close: rates[quote],
+  }));
+
+  return closes.map((c, i) => {
+    const prevClose = i > 0 ? closes[i - 1].close : c.close;
+    const open  = prevClose;
+    const range = Math.abs(c.close - open) * 1.5 + c.close * 0.001;
+    const high  = Math.max(open, c.close) + range * 0.4;
+    const low   = Math.min(open, c.close) - range * 0.4;
+    // Synthetic volume correlated with price movement magnitude
+    const move  = Math.abs(c.close - open) / open;
+    const volume = Math.floor(500000 + move * 50000000);
+    return { time: c.time, open, high, low, close: c.close, volume };
   });
 }
 

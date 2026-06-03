@@ -39,7 +39,7 @@ export const SAFETY_RULES = {
   requireLeverageConfirmation: true,
   avoidLowLiquiditySessions: true,
   maxSuggestedLeverage: 10,
-  minConfidenceScore: 50,
+  minConfidenceScore: 40,
   requireStopLoss: true,
 };
 
