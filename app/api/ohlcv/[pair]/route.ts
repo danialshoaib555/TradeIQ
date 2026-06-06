@@ -23,16 +23,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ pair
           if (!Array.isArray(ohlcv) || ohlcv.length === 0) throw new Error('empty');
         } catch {
           if (pair.coinGeckoId) {
-            ohlcv = await fetchCryptoOHLCV(pair.coinGeckoId, Math.max(daysMap[tf] ?? 1, 7));
+            ohlcv = await fetchCryptoOHLCV(pair.coinGeckoId, Math.max(daysMap[tf] ?? 1, 14));
           }
         }
       } else if (pair.coinGeckoId) {
-        ohlcv = await fetchCryptoOHLCV(pair.coinGeckoId, Math.max(daysMap[tf] ?? 1, 7));
+        ohlcv = await fetchCryptoOHLCV(pair.coinGeckoId, Math.max(daysMap[tf] ?? 1, 14));
       }
-    } else if ((pair.market === 'forex' || pair.market === 'commodities') && pair.base && pair.quote) {
+    } else if (pair.market === 'forex' && pair.base && pair.quote) {
       // Fetch 90 days to get enough candles for reliable indicator calculations
       ohlcv = await fetchForexOHLCV(pair.base, pair.quote, 90);
-    } else if (pair.market === 'stocks' && pair.ticker) {
+    } else if ((pair.market === 'stocks' || pair.market === 'commodities') && pair.ticker) {
       ohlcv = await fetchStockOHLCV(pair.ticker, ivMap[tf] ?? '1d', rangeMap[tf] ?? '1mo');
     } else {
       return NextResponse.json({ error: 'Unsupported pair' }, { status: 400 });

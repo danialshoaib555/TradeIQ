@@ -81,18 +81,30 @@ export function calculateSignal(ohlcv: OHLCV[]): SignalResult {
 
   const avgVolume  = vols.slice(-20).reduce((a, b) => a + b, 0) / 20;
   const lastVolume = vols.at(-1) ?? 0;
+  const hasVolumeData = avgVolume > 0 || lastVolume > 0;
 
   const emaCrossedBullish = ema9prev < ema21prev && ema9 > ema21;
   const emaCrossedBearish = ema9prev > ema21prev && ema9 < ema21;
+  // Also check if EMA9 is above/below EMA21 (trend alignment, not just crossover)
+  const ema9AboveEma21 = ema9 > ema21;
+  const ema9BelowEma21 = ema9 < ema21;
   const macdBullCross = !!(macdPrev?.MACD && macdPrev?.signal && macd?.MACD && macd?.signal && macdPrev.MACD < macdPrev.signal && macd.MACD > macd.signal);
   const macdBearCross = !!(macdPrev?.MACD && macdPrev?.signal && macd?.MACD && macd?.signal && macdPrev.MACD > macdPrev.signal && macd.MACD < macd.signal);
-  const volumeSpike  = avgVolume > 0 ? lastVolume > avgVolume * 1.3 : false;
+  // Also check MACD histogram direction when no crossover
+  const macdBullish = !!(macd?.MACD && macd?.signal && macd.MACD > macd.signal);
+  const macdBearish = !!(macd?.MACD && macd?.signal && macd.MACD < macd.signal);
+  const volumeSpike  = hasVolumeData ? lastVolume > avgVolume * 1.3 : false;
   const nearLowerBB  = bb ? lastClose <= bb.lower * 1.005 : false;
   const nearUpperBB  = bb ? lastClose >= bb.upper * 0.995 : false;
   const trending     = (adx?.adx ?? 0) > 25;
 
-  const buyConditions  = [rsi < 35, emaCrossedBullish, macdBullCross, nearLowerBB, volumeSpike];
-  const sellConditions = [rsi > 65, emaCrossedBearish, macdBearCross, nearUpperBB, volumeSpike];
+  // Core conditions (always scored)
+  const coreBuyConditions  = [rsi < 35, emaCrossedBullish || ema9AboveEma21, macdBullCross || macdBullish, nearLowerBB];
+  const coreSellConditions = [rsi > 65, emaCrossedBearish || ema9BelowEma21, macdBearCross || macdBearish, nearUpperBB];
+
+  // Volume condition added only when volume data is available
+  const buyConditions  = hasVolumeData ? [...coreBuyConditions,  volumeSpike] : coreBuyConditions;
+  const sellConditions = hasVolumeData ? [...coreSellConditions, volumeSpike] : coreSellConditions;
 
   const buyCount  = buyConditions.filter(Boolean).length;
   const sellCount = sellConditions.filter(Boolean).length;
@@ -135,9 +147,9 @@ export function calculateSignal(ohlcv: OHLCV[]): SignalResult {
     indicators: { rsi, ema9, ema21, macd: macd?.MACD, macdSignal: macd?.signal, bb: bb ? { upper: bb.upper, middle: bb.middle, lower: bb.lower } : undefined, adx: adx?.adx, atr, trending },
     conditions: {
       rsi:  signal === 'BUY' ? rsi < 35 : rsi > 65,
-      ema:  signal === 'BUY' ? emaCrossedBullish : emaCrossedBearish,
-      macd: signal === 'BUY' ? macdBullCross : macdBearCross,
-      vol:  volumeSpike,
+      ema:  signal === 'BUY' ? (emaCrossedBullish || ema9AboveEma21) : (emaCrossedBearish || ema9BelowEma21),
+      macd: signal === 'BUY' ? (macdBullCross || macdBullish) : (macdBearCross || macdBearish),
+      vol:  hasVolumeData ? volumeSpike : false,
       bb:   signal === 'BUY' ? nearLowerBB : nearUpperBB,
     },
   };

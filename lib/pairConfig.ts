@@ -30,9 +30,9 @@ export const PAIRS: Pair[] = [
   { id: 'nvda', name: 'NVDA', market: 'stocks', ticker: 'NVDA', pipSize: 0.01 },
   { id: 'msft', name: 'MSFT', market: 'stocks', ticker: 'MSFT', pipSize: 0.01 },
   { id: 'amzn', name: 'AMZN', market: 'stocks', ticker: 'AMZN', pipSize: 0.01 },
-  { id: 'xauusd', name: 'XAU/USD', market: 'commodities', base: 'XAU', quote: 'USD', pipSize: 0.01 },
-  { id: 'xagusd', name: 'XAG/USD', market: 'commodities', base: 'XAG', quote: 'USD', pipSize: 0.001 },
-  { id: 'wtiusd', name: 'WTI Oil', market: 'commodities', pipSize: 0.01 },
+  { id: 'xauusd', name: 'XAU/USD', market: 'commodities', ticker: 'GC=F', pipSize: 0.01 },
+  { id: 'xagusd', name: 'XAG/USD', market: 'commodities', ticker: 'SI=F', pipSize: 0.001 },
+  { id: 'wtiusd', name: 'WTI Oil', market: 'commodities', ticker: 'CL=F', pipSize: 0.01 },
 ];
 
 export function getPairById(id: string): Pair | undefined {
