@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { PAIRS, MARKET_COLORS } from '@/lib/pairConfig';
 import { useSignalStore, type PairSignal } from '@/store/useSignalStore';
@@ -22,14 +22,13 @@ export default function SignalFeed() {
   const [sortBy, setSortBy] = useState<'confidence' | 'signal'>('confidence');
   const [marketFilter, setMarketFilter] = useState<string>('all');
   const [page, setPage] = useState(1);
+  const [countdown, setCountdown] = useState(300);
 
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      setLoading(true);
-      setLoadedCount(0);
-      let done = 0;
-      await Promise.allSettled(
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadedCount(0);
+    let done = 0;
+    await Promise.allSettled(
         PAIRS.map(async (pair) => {
           try {
             const res = await fetch(`/api/ohlcv/${pair.id}?tf=1h`);
@@ -39,20 +38,28 @@ export default function SignalFeed() {
             const signal = calculateSignal(ohlcv);
             const levels = calculateLevels(ohlcv, signal.signal, pair);
             const { best } = getBestStrategy(signal);
-            if (!cancelled) setSignal(pair.id, { pairId: pair.id, pairName: pair.name, market: pair.market, signal, levels, strategy: best, price: ohlcv.at(-1)?.close ?? 0, updatedAt: Date.now(), loading: false, error: null });
+            setSignal(pair.id, { pairId: pair.id, pairName: pair.name, market: pair.market, signal, levels, strategy: best, price: ohlcv.at(-1)?.close ?? 0, updatedAt: Date.now(), loading: false, error: null });
           } catch {
-            if (!cancelled) setSignal(pair.id, { pairId: pair.id, pairName: pair.name, market: pair.market, signal: WAIT_SIGNAL, levels: null, strategy: null, price: 0, updatedAt: Date.now(), loading: false, error: 'Data unavailable' });
+            setSignal(pair.id, { pairId: pair.id, pairName: pair.name, market: pair.market, signal: WAIT_SIGNAL, levels: null, strategy: null, price: 0, updatedAt: Date.now(), loading: false, error: 'Data unavailable' });
           }
           done++;
-          if (!cancelled) setLoadedCount(done);
+          setLoadedCount(done);
         })
       );
-      if (!cancelled) { setLastRefresh(Date.now()); setLoading(false); }
-    };
-    load();
-    const id = setInterval(load, 5 * 60 * 1000);
-    return () => { cancelled = true; clearInterval(id); };
+      setLastRefresh(Date.now()); setLoading(false);
   }, [setSignal, setLastRefresh]);
+
+  useEffect(() => {
+    load();
+    // Countdown timer
+    const cdId = setInterval(() => {
+      setCountdown(c => {
+        if (c <= 1) { load(); return 300; }
+        return c - 1;
+      });
+    }, 1000);
+    return () => clearInterval(cdId);
+  }, [load]);
 
   const list = Object.values(signals).filter(Boolean) as PairSignal[];
   const filtered = marketFilter === 'all' ? list : list.filter(s => s.market === marketFilter);
@@ -80,13 +87,24 @@ export default function SignalFeed() {
       {/* Header */}
       <div className="px-5 py-4 border-b border-white/5">
         <div className="flex items-center justify-between mb-3 flex-wrap gap-3">
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             <h2 className="font-semibold text-white">Signal Feed</h2>
-            {loading && (
+            {loading ? (
               <span className="text-xs text-slate-500 flex items-center gap-1.5">
                 <span className="w-3 h-3 border border-slate-500 border-t-emerald-400 rounded-full animate-spin inline-block" />
                 {loadedCount}/{PAIRS.length}
               </span>
+            ) : (
+              <div className="flex items-center gap-1.5 text-xs text-slate-600">
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="font-mono">{String(Math.floor(countdown/60)).padStart(2,'0')}:{String(countdown%60).padStart(2,'0')}</span>
+                <button onClick={() => { load(); setCountdown(300); }}
+                  className="text-slate-600 hover:text-slate-400 cursor-pointer transition-colors" title="Refresh now">
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                </button>
+              </div>
             )}
           </div>
           {/* Market breadth */}
