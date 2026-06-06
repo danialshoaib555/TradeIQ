@@ -16,16 +16,13 @@ export default function LiveChart({ pairId, levels, signal, timeframe = '1h' }: 
   const containerRef = useRef<HTMLDivElement>(null);
   const [ohlcv, setOhlcv] = useState<Array<{ time: number; open: number; high: number; low: number; close: number }>>([]);
   const [ready, setReady] = useState(false);
-  const [chartMounted, setChartMounted] = useState(false);
 
   useEffect(() => {
     setReady(false);
-    setChartMounted(false);
+    setOhlcv([]);
     fetch(`/api/ohlcv/${pairId}?tf=${timeframe}`)
       .then(r => r.json())
-      .then(data => {
-        if (Array.isArray(data)) setOhlcv(data);
-      })
+      .then(data => { if (Array.isArray(data)) setOhlcv(data); })
       .catch(() => {})
       .finally(() => setReady(true));
   }, [pairId, timeframe]);
@@ -33,63 +30,82 @@ export default function LiveChart({ pairId, levels, signal, timeframe = '1h' }: 
   useEffect(() => {
     if (!ready || !containerRef.current || ohlcv.length === 0) return;
 
-    let chart: { remove: () => void; timeScale: () => { fitContent: () => void }; addCandlestickSeries: (opts: unknown) => { setData: (d: unknown[]) => void; createPriceLine: (opts: unknown) => void; setMarkers: (m: unknown[]) => void } } | null = null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let chart: any = null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let markersPlugin: any = null;
 
     const init = async () => {
       try {
-        const LWC = await import('lightweight-charts');
+        // lightweight-charts v5 API
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const LWC = await import('lightweight-charts') as any;
         if (!containerRef.current) return;
 
-        chart = ((LWC as unknown) as { createChart: (el: HTMLElement, opts: unknown) => typeof chart }).createChart(containerRef.current, {
-          layout: { background: { color: 'transparent' }, textColor: '#94A3B8' },
-          grid: { vertLines: { color: 'rgba(255,255,255,0.03)' }, horzLines: { color: 'rgba(255,255,255,0.03)' } },
+        chart = LWC.createChart(containerRef.current, {
+          layout: {
+            background: { color: 'transparent' },
+            textColor: '#94A3B8',
+          },
+          grid: {
+            vertLines: { color: 'rgba(255,255,255,0.04)' },
+            horzLines: { color: 'rgba(255,255,255,0.04)' },
+          },
           rightPriceScale: { borderColor: 'rgba(255,255,255,0.08)' },
-          timeScale: { borderColor: 'rgba(255,255,255,0.08)', timeVisible: true, secondsVisible: false },
+          timeScale: {
+            borderColor: 'rgba(255,255,255,0.08)',
+            timeVisible: true,
+            secondsVisible: false,
+          },
           width: containerRef.current.clientWidth,
-          height: containerRef.current.clientHeight || 400,
+          height: containerRef.current.clientHeight || 420,
         });
 
-        if (!chart) return;
-
-        const candles = chart.addCandlestickSeries({
-          upColor: '#22C55E', downColor: '#EF4444',
-          borderUpColor: '#22C55E', borderDownColor: '#EF4444',
-          wickUpColor: '#22C55E', wickDownColor: '#EF4444',
+        // v5: addSeries(SeriesType, options)
+        const candleSeries = chart.addSeries(LWC.CandlestickSeries, {
+          upColor: '#22C55E',
+          downColor: '#EF4444',
+          borderUpColor: '#22C55E',
+          borderDownColor: '#EF4444',
+          wickUpColor: '#22C55E',
+          wickDownColor: '#EF4444',
         });
 
         const sorted = [...ohlcv].sort((a, b) => a.time - b.time);
-        candles.setData(sorted as unknown[]);
+        candleSeries.setData(sorted);
 
+        // Price lines for TP/SL
         if (levels && signal && signal.signal !== 'WAIT') {
-          const sig = signal;
-          const line = (price: number, color: string, title: string) =>
-            candles.createPriceLine({ price, color, lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title });
-          line(levels.entry, '#60A5FA', 'Entry');
-          line(levels.sl,    '#EF4444', 'SL');
-          line(levels.tp1,   '#4ADE80', 'TP1');
-          line(levels.tp2,   '#22C55E', 'TP2');
-          line(levels.tp3,   '#16A34A', 'TP3');
+          const makeLine = (price: number, color: string, title: string) =>
+            candleSeries.createPriceLine({ price, color, lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title });
+          makeLine(levels.entry, '#60A5FA', 'Entry');
+          makeLine(levels.sl,    '#EF4444', 'SL');
+          makeLine(levels.tp1,   '#4ADE80', 'TP1');
+          makeLine(levels.tp2,   '#22C55E', 'TP2');
+          makeLine(levels.tp3,   '#16A34A', 'TP3');
 
-          const last = sorted.at(-1);
-          if (last) {
-            candles.setMarkers([{
-              time: last.time,
-              position: sig.signal === 'BUY' ? 'belowBar' : 'aboveBar',
-              color: sig.signal === 'BUY' ? '#22C55E' : '#EF4444',
-              shape: sig.signal === 'BUY' ? 'arrowUp' : 'arrowDown',
-              text: sig.signal,
-            }]);
+          // v5: createSeriesMarkers plugin
+          if (LWC.createSeriesMarkers) {
+            const last = sorted.at(-1);
+            if (last) {
+              markersPlugin = LWC.createSeriesMarkers(candleSeries, [{
+                time: last.time,
+                position: signal.signal === 'BUY' ? 'belowBar' : 'aboveBar',
+                color: signal.signal === 'BUY' ? '#22C55E' : '#EF4444',
+                shape: signal.signal === 'BUY' ? 'arrowUp' : 'arrowDown',
+                text: signal.signal,
+              }]);
+            }
           }
         }
 
         chart.timeScale().fitContent();
-        setChartMounted(true);
 
         const ro = new ResizeObserver(() => {
           if (containerRef.current && chart) {
-            (chart as { resize?: (w: number, h: number) => void }).resize?.(
+            chart.resize(
               containerRef.current.clientWidth,
-              containerRef.current.clientHeight || 400
+              containerRef.current.clientHeight || 420
             );
           }
         });
@@ -101,27 +117,30 @@ export default function LiveChart({ pairId, levels, signal, timeframe = '1h' }: 
       }
     };
 
-    const cleanup = init();
+    const cleanupPromise = init();
     return () => {
-      cleanup.then(fn => fn?.());
+      cleanupPromise.then(fn => fn?.());
+      markersPlugin?.detach?.();
       chart?.remove();
+      chart = null;
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, ohlcv, levels, signal]);
 
   return (
-    <div className="relative w-full h-full min-h-[400px]">
-      <div ref={containerRef} className="w-full h-full" />
+    <div className="relative w-full h-full min-h-[420px]">
+      <div ref={containerRef} className="w-full h-full min-h-[420px]" />
       {!ready && (
         <div className="absolute inset-0 flex items-center justify-center bg-slate-900/80 rounded-xl z-10">
           <div className="flex items-center gap-2 text-slate-400">
             <div className="w-5 h-5 border-2 border-slate-500 border-t-emerald-400 rounded-full animate-spin" />
-            Loading chart...
+            Loading chart…
           </div>
         </div>
       )}
       {ready && ohlcv.length === 0 && (
-        <div className="absolute inset-0 flex items-center justify-center text-slate-500">
-          No data available for this pair
+        <div className="absolute inset-0 flex items-center justify-center text-slate-500 text-sm">
+          No chart data available for this pair
         </div>
       )}
     </div>

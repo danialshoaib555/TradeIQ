@@ -3,7 +3,6 @@ import TopBar from '@/components/layout/TopBar';
 import NewsWarningBanner from '@/components/layout/NewsWarningBanner';
 import SignalFeed from '@/components/signals/SignalFeed';
 import SessionClock from '@/components/tools/SessionClock';
-import EconomicCalendar from '@/components/tools/EconomicCalendar';
 import MetricCards from '@/components/dashboard/MetricCards';
 
 export default function DashboardPage() {
@@ -28,7 +27,6 @@ export default function DashboardPage() {
               </div>
               <div className="space-y-6">
                 <SessionClock />
-                <EconomicCalendar />
               </div>
             </div>
           </div>
