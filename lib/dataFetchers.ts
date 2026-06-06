@@ -48,7 +48,7 @@ export async function fetchForexRate(base: string, quote: string): Promise<numbe
 }
 
 export async function fetchStockOHLCV(ticker: string, interval = '1d', range = '3mo'): Promise<OHLCV[]> {
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=${interval}&range=${range}`;
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=${interval}&range=${range}`;
   const res = await fetch(url, {
     headers: { 'User-Agent': 'Mozilla/5.0' },
     next: { revalidate: 300 },

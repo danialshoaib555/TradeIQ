@@ -4,6 +4,7 @@ import NewsWarningBanner from '@/components/layout/NewsWarningBanner';
 import SignalFeed from '@/components/signals/SignalFeed';
 import SessionClock from '@/components/tools/SessionClock';
 import MetricCards from '@/components/dashboard/MetricCards';
+import NewsPanel from '@/components/news/NewsPanel';
 
 export default function DashboardPage() {
   return (
@@ -12,21 +13,26 @@ export default function DashboardPage() {
       <div className="flex-1 flex flex-col overflow-hidden">
         <TopBar />
         <NewsWarningBanner />
-        <main className="flex-1 overflow-y-auto p-6">
-          <div className="max-w-screen-xl mx-auto space-y-6">
+        <main className="flex-1 overflow-y-auto p-5">
+          <div className="max-w-screen-2xl mx-auto space-y-5">
             <div>
               <h1 className="text-2xl font-bold text-white mb-1">
                 Trade<span className="text-emerald-400">IQ</span> Dashboard
               </h1>
-              <p className="text-slate-500 text-sm">Live signals across Forex, Crypto, Stocks &amp; Commodities</p>
+              <p className="text-slate-500 text-sm">Live signals · {new Date().toLocaleDateString('en-US', {weekday:'long', year:'numeric', month:'long', day:'numeric'})}</p>
             </div>
             <MetricCards />
-            <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 xl:grid-cols-5 gap-5">
+              {/* Signal feed — 3 cols */}
               <div className="xl:col-span-3">
                 <SignalFeed />
               </div>
-              <div className="space-y-6">
+              {/* Right column — 2 cols */}
+              <div className="xl:col-span-2 flex flex-col gap-5">
                 <SessionClock />
+                <div className="flex-1 min-h-[400px]">
+                  <NewsPanel />
+                </div>
               </div>
             </div>
           </div>

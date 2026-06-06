@@ -32,7 +32,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ pair
     } else if (pair.market === 'forex' && pair.base && pair.quote) {
       // Fetch 90 days to get enough candles for reliable indicator calculations
       ohlcv = await fetchForexOHLCV(pair.base, pair.quote, 90);
-    } else if ((pair.market === 'stocks' || pair.market === 'commodities') && pair.ticker) {
+    } else if ((pair.market === 'stocks' || pair.market === 'commodities' || pair.market === 'indices') && pair.ticker) {
       ohlcv = await fetchStockOHLCV(pair.ticker, ivMap[tf] ?? '1d', rangeMap[tf] ?? '1mo');
     } else {
       return NextResponse.json({ error: 'Unsupported pair' }, { status: 400 });
