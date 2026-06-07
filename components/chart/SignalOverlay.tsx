@@ -3,18 +3,22 @@ import Link from 'next/link';
 import type { SignalResult } from '@/lib/signalEngine';
 import type { TradeLevels } from '@/lib/levelCalculator';
 import type { Strategy } from '@/lib/strategyMatcher';
+import type { BacktestResult, StrategyKey } from '@/lib/backtester';
+import { STRATEGY_META } from '@/lib/backtester';
 
 interface Props {
   signal: SignalResult;
   levels: TradeLevels | null;
-  forcedLevels: TradeLevels | null;   // levels computed for the forced direction
+  forcedLevels: TradeLevels | null;
   strategy: Strategy | null;
   tradeType: 'auto' | 'long' | 'short';
   onTradeTypeChange: (t: 'auto' | 'long' | 'short') => void;
+  // Backtest data for selected strategy
+  selectedStrategy?: StrategyKey;
+  backtestResult?: BacktestResult | null;
 }
 
-export default function SignalOverlay({ signal, levels, forcedLevels, strategy, tradeType, onTradeTypeChange }: Props) {
-  // Effective direction: tradeType overrides the AI signal
+export default function SignalOverlay({ signal, levels, forcedLevels, strategy, tradeType, onTradeTypeChange, selectedStrategy, backtestResult }: Props) {
   const effectiveDir = tradeType === 'long' ? 'BUY' : tradeType === 'short' ? 'SELL' : signal.signal;
   const activeLevels = (tradeType !== 'auto') ? forcedLevels : levels;
 
@@ -33,13 +37,86 @@ export default function SignalOverlay({ signal, levels, forcedLevels, strategy, 
   ];
 
   const tradeButtons: { key: 'auto' | 'long' | 'short'; label: string; active: string; inactive: string }[] = [
-    { key: 'auto',  label: 'Auto', active: 'bg-slate-500/20 text-slate-300 border-slate-500/40', inactive: 'bg-white/5 text-slate-500 border-white/8' },
-    { key: 'long',  label: '↑ Long', active: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40', inactive: 'bg-white/5 text-slate-500 border-white/8 hover:text-emerald-400' },
+    { key: 'auto',  label: 'Auto',    active: 'bg-slate-500/20 text-slate-300 border-slate-500/40', inactive: 'bg-white/5 text-slate-500 border-white/8' },
+    { key: 'long',  label: '↑ Long',  active: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40', inactive: 'bg-white/5 text-slate-500 border-white/8 hover:text-emerald-400' },
     { key: 'short', label: '↓ Short', active: 'bg-red-500/20 text-red-400 border-red-500/40', inactive: 'bg-white/5 text-slate-500 border-white/8 hover:text-red-400' },
   ];
 
+  const stratMeta = selectedStrategy ? STRATEGY_META[selectedStrategy] : null;
+  const wr  = backtestResult?.winRate ?? 0;
+  const exp = backtestResult?.expectancy ?? 0;
+  const pf  = backtestResult?.profitFactor ?? 0;
+  const tot = backtestResult?.totalTrades ?? 0;
+  const hasBacktest = tot > 0;
+
   return (
     <div className="space-y-4">
+
+      {/* ── Strategy Confidence Banner ── */}
+      {stratMeta && (
+        <div className="bg-white/3 border border-white/8 rounded-xl p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: stratMeta.color }} />
+              <span className="text-xs font-medium text-white truncate">{stratMeta.name}</span>
+            </div>
+            <span className={`text-xs px-1.5 py-0.5 rounded border capitalize ${
+              stratMeta.difficulty === 'beginner' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' :
+              stratMeta.difficulty === 'intermediate' ? 'text-amber-400 bg-amber-500/10 border-amber-500/20' :
+              'text-red-400 bg-red-500/10 border-red-500/20'
+            }`}>{stratMeta.difficulty[0].toUpperCase()}</span>
+          </div>
+
+          {hasBacktest ? (
+            <>
+              {/* Win rate bar */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs text-slate-500">Backtest Win Rate</span>
+                  <span className={`text-xs font-mono font-bold ${wr >= 60 ? 'text-emerald-400' : wr >= 50 ? 'text-amber-400' : 'text-red-400'}`}>{wr}%</span>
+                </div>
+                <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
+                  <div className="h-full rounded-full transition-all duration-500"
+                    style={{ width: `${wr}%`, backgroundColor: wr >= 60 ? '#22C55E' : wr >= 50 ? '#F59E0B' : '#EF4444' }} />
+                </div>
+              </div>
+
+              {/* Stats row */}
+              <div className="grid grid-cols-3 gap-1.5">
+                <div className="bg-white/4 rounded-lg p-1.5 text-center">
+                  <div className={`text-sm font-mono font-bold ${exp >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {exp >= 0 ? '+' : ''}{exp}R
+                  </div>
+                  <div className="text-xs text-slate-600">Expect.</div>
+                </div>
+                <div className="bg-white/4 rounded-lg p-1.5 text-center">
+                  <div className="text-sm font-mono font-bold text-white">{pf}×</div>
+                  <div className="text-xs text-slate-600">Prof. F.</div>
+                </div>
+                <div className="bg-white/4 rounded-lg p-1.5 text-center">
+                  <div className="text-sm font-mono font-bold text-white">{tot}</div>
+                  <div className="text-xs text-slate-600">Trades</div>
+                </div>
+              </div>
+
+              {/* W/L bar */}
+              <div className="flex items-center gap-2 text-xs text-slate-500">
+                <span className="text-emerald-600">{backtestResult!.wins}W</span>
+                <div className="flex-1 h-1 bg-white/5 rounded-full overflow-hidden flex">
+                  {tot > 0 && <>
+                    <div className="h-full bg-emerald-500" style={{ width: `${wr}%` }} />
+                    <div className="h-full bg-red-500" style={{ width: `${100 - wr}%` }} />
+                  </>}
+                </div>
+                <span className="text-red-600">{backtestResult!.losses}L</span>
+              </div>
+            </>
+          ) : (
+            <p className="text-xs text-slate-600">{stratMeta.shortDesc} · not enough candles for backtest</p>
+          )}
+        </div>
+      )}
+
       {/* ── Direction Toggle ── */}
       <div>
         <p className="text-xs text-slate-500 mb-2">Trade Direction</p>
@@ -149,11 +226,11 @@ export default function SignalOverlay({ signal, levels, forcedLevels, strategy, 
         </div>
       )}
 
-      {/* ── Strategy ── */}
+      {/* ── Strategy tip ── */}
       {strategy && (
         <div className="bg-blue-500/5 border border-blue-500/15 rounded-xl p-3">
           <div className="flex items-center justify-between mb-1">
-            <p className="text-xs font-medium text-blue-400">{strategy.name}</p>
+            <p className="text-xs font-medium text-blue-400">AI Best Match</p>
             <span className="text-xs text-slate-500">{strategy.winRate}% win</span>
           </div>
           <p className="text-xs text-slate-400 mb-2 line-clamp-2">{strategy.explanation}</p>

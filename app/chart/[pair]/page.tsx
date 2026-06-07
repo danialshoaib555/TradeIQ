@@ -256,6 +256,8 @@ export default function ChartPage({ params }: { params: Promise<{ pair: string }
                     strategy={strategy}
                     tradeType={tradeType}
                     onTradeTypeChange={setTradeType}
+                    selectedStrategy={selectedStrategy}
+                    backtestResult={backtestResults?.[selectedStrategy] ?? null}
                   />
                 ) : (
                   <div className="flex items-center justify-center h-48 text-slate-500">
