@@ -1,7 +1,7 @@
 'use client';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import type { BacktestResult } from '@/lib/backtester';
-import { STRATEGY_META, STRATEGY_KEYS, type StrategyKey } from '@/lib/backtester';
+import { STRATEGY_META, STRATEGY_KEYS, CATEGORY_META, type StrategyKey, type StrategyCategory } from '@/lib/backtester';
 import type { SignalResult } from '@/lib/signalEngine';
 import { getBestStrategy } from '@/lib/strategyMatcher';
 
@@ -14,8 +14,15 @@ interface Props {
   candles: number;
 }
 
+const DIFFICULTY_COLOR: Record<string, string> = {
+  beginner:     'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
+  intermediate: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
+  advanced:     'text-red-400 bg-red-500/10 border-red-500/20',
+};
+
 export default function StrategyPanel({ results, selectedStrategy, onSelect, signal, loading, candles }: Props) {
-  // Sort strategies by backtest win rate (only those with trades)
+  const [catFilter, setCatFilter] = useState<StrategyCategory | 'all'>('all');
+
   const sorted = useMemo(() => {
     if (!results) return [...STRATEGY_KEYS];
     return [...STRATEGY_KEYS].sort((a, b) => {
@@ -24,12 +31,12 @@ export default function StrategyPanel({ results, selectedStrategy, onSelect, sig
       if (ar.totalTrades === 0 && br.totalTrades === 0) return 0;
       if (ar.totalTrades === 0) return 1;
       if (br.totalTrades === 0) return -1;
-      // Sort by expectancy
       return br.expectancy - ar.expectancy;
     });
   }, [results]);
 
-  // Which strategy currently has an active AI signal
+  const filtered = catFilter === 'all' ? sorted : sorted.filter(k => STRATEGY_META[k].category === catFilter);
+
   const activeBySignal = useMemo(() => {
     if (!signal || signal.signal === 'WAIT') return null;
     const { best } = getBestStrategy(signal);
@@ -37,6 +44,8 @@ export default function StrategyPanel({ results, selectedStrategy, onSelect, sig
   }, [signal]);
 
   const best = sorted[0];
+
+  const categories = Object.entries(CATEGORY_META) as [StrategyCategory, { label: string; color: string }][];
 
   if (loading) {
     return (
@@ -51,24 +60,41 @@ export default function StrategyPanel({ results, selectedStrategy, onSelect, sig
 
   return (
     <div className="space-y-3">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <p className="text-xs font-medium text-slate-300">Strategy Backtester</p>
           <p className="text-xs text-slate-600 mt-0.5">
-            {candles} candles · {results?.[sorted[0]]?.totalTrades ?? 0} trades avg
+            {candles} candles · {STRATEGY_KEYS.length} strategies
           </p>
         </div>
         {results && results[best]?.totalTrades > 0 && (
           <div className="px-2 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/25 text-xs text-emerald-400 font-medium">
-            Best: {STRATEGY_META[best].name.split(' ')[0]}
+            ★ {STRATEGY_META[best].name.split(' ')[0]}
           </div>
         )}
       </div>
 
+      {/* Category filter */}
+      <div className="flex flex-wrap gap-1">
+        <button
+          onClick={() => setCatFilter('all')}
+          className={`px-2 py-0.5 rounded text-xs border transition-all cursor-pointer ${catFilter === 'all' ? 'bg-white/15 text-white border-white/20' : 'text-slate-500 border-transparent hover:text-slate-300'}`}>
+          All
+        </button>
+        {categories.map(([cat, meta]) => (
+          <button key={cat} onClick={() => setCatFilter(cat)}
+            className={`px-2 py-0.5 rounded text-xs border transition-all cursor-pointer ${catFilter === cat ? 'bg-white/15 text-white border-white/20' : 'text-slate-500 border-transparent hover:text-slate-300'}`}>
+            {meta.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Strategy list */}
       <div className="space-y-2">
-        {sorted.map((key) => {
-          const meta    = STRATEGY_META[key];
-          const res     = results?.[key];
+        {filtered.map((key) => {
+          const meta     = STRATEGY_META[key];
+          const res      = results?.[key];
           const isActive = selectedStrategy === key;
           const isBest   = key === best && (res?.totalTrades ?? 0) > 0;
           const hasSignal= key === activeBySignal;
@@ -83,38 +109,32 @@ export default function StrategyPanel({ results, selectedStrategy, onSelect, sig
                   : 'bg-white/3 border-white/6 hover:bg-white/6 hover:border-white/12'
               }`}>
               {/* Header row */}
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-1.5 min-w-0">
+              <div className="flex items-center justify-between mb-1.5">
+                <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
                   <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: meta.color }} />
-                  <span className={`text-sm font-medium truncate ${isActive ? 'text-white' : 'text-slate-300'}`}>{meta.name}</span>
-                  {isBest   && <span className="px-1.5 py-0.5 rounded text-xs bg-amber-500/15 border border-amber-500/25 text-amber-400 flex-shrink-0">★ Best</span>}
-                  {hasSignal && <span className="px-1.5 py-0.5 rounded text-xs bg-emerald-500/15 border border-emerald-500/25 text-emerald-400 flex-shrink-0">Live</span>}
+                  <span className={`text-xs font-medium truncate ${isActive ? 'text-white' : 'text-slate-300'}`}>{meta.name}</span>
+                  {isBest    && <span className="px-1 py-0.5 rounded text-xs bg-amber-500/15 border border-amber-500/25 text-amber-400 flex-shrink-0">★</span>}
+                  {hasSignal && <span className="px-1 py-0.5 rounded text-xs bg-emerald-500/15 border border-emerald-500/25 text-emerald-400 flex-shrink-0">Live</span>}
                 </div>
-                {isActive && (
-                  <div className="w-4 h-4 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0">
-                    <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                    </svg>
-                  </div>
-                )}
+                <span className={`px-1.5 py-0.5 rounded text-xs border flex-shrink-0 ${DIFFICULTY_COLOR[meta.difficulty]}`}>
+                  {meta.difficulty[0].toUpperCase()}
+                </span>
               </div>
 
-              {/* Stats row */}
+              {/* Stats */}
               {trades > 0 ? (
                 <>
-                  {/* Win rate bar */}
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <div className="flex-1 h-1.5 bg-white/5 rounded-full overflow-hidden">
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="flex-1 h-1 bg-white/5 rounded-full overflow-hidden">
                       <div className="h-full rounded-full transition-all duration-500"
                         style={{ width: `${wr}%`, backgroundColor: wr >= 60 ? '#22C55E' : wr >= 50 ? '#F59E0B' : '#EF4444' }} />
                     </div>
-                    <span className={`text-xs font-mono font-bold w-8 text-right ${wr >= 60 ? 'text-emerald-400' : wr >= 50 ? 'text-amber-400' : 'text-red-400'}`}>
+                    <span className={`text-xs font-mono font-bold w-7 text-right ${wr >= 60 ? 'text-emerald-400' : wr >= 50 ? 'text-amber-400' : 'text-red-400'}`}>
                       {wr}%
                     </span>
                   </div>
-                  {/* Details */}
-                  <div className="flex items-center gap-3 text-xs text-slate-500">
-                    <span>{trades} trades</span>
+                  <div className="flex items-center gap-2 text-xs text-slate-500">
+                    <span>{trades}T</span>
                     <span className="text-emerald-600">{res!.wins}W</span>
                     <span className="text-red-600">{res!.losses}L</span>
                     <span className="ml-auto">PF {res!.profitFactor}×</span>
@@ -127,27 +147,37 @@ export default function StrategyPanel({ results, selectedStrategy, onSelect, sig
                 <p className="text-xs text-slate-600">{meta.shortDesc} · no trades in range</p>
               )}
 
-              {/* Indicator tags */}
+              {/* Indicator tags (when active) */}
               {isActive && (
-                <div className="flex gap-1 mt-2">
+                <div className="flex gap-1 mt-2 flex-wrap">
                   {meta.indicators.map(ind => (
                     <span key={ind} className="px-1.5 py-0.5 rounded text-xs bg-white/8 text-slate-400 border border-white/8">
                       {ind}
                     </span>
                   ))}
+                  <span className="px-1.5 py-0.5 rounded text-xs bg-white/5 text-slate-500 border border-white/5 capitalize">
+                    {meta.bestFor}
+                  </span>
                 </div>
               )}
             </button>
           );
         })}
+
+        {filtered.length === 0 && (
+          <div className="py-6 text-center text-slate-500 text-xs">No strategies in this category</div>
+        )}
       </div>
 
       {/* Legend */}
       <div className="pt-2 border-t border-white/5 space-y-1">
         <p className="text-xs text-slate-600">Backtested on historical candles — past results don't guarantee future performance.</p>
-        <div className="flex gap-3 text-xs text-slate-600">
+        <div className="flex gap-3 text-xs text-slate-600 flex-wrap">
           <span>★ = best expectancy</span>
           <span>Live = AI signal active</span>
+          <span className="text-emerald-600">B</span><span>=beginner</span>
+          <span className="text-amber-600">I</span><span>=intermediate</span>
+          <span className="text-red-600">A</span><span>=advanced</span>
         </div>
       </div>
     </div>

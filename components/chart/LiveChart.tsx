@@ -41,11 +41,31 @@ function bbCalc(values: number[], period = 20, mult = 2) {
 
 // Strategy → which overlays to show automatically
 const STRATEGY_OVERLAYS: Record<StrategyKey, { ema: boolean; bb: boolean }> = {
-  ema_cross:    { ema: true,  bb: false },
-  rsi_reversal: { ema: false, bb: true  },
-  bb_squeeze:   { ema: true,  bb: true  },
-  sr_bounce:    { ema: true,  bb: false },
-  macd_cross:   { ema: true,  bb: false },
+  ema_cross:      { ema: true,  bb: false },
+  trend_pullback: { ema: true,  bb: false },
+  supertrend:     { ema: true,  bb: false },
+  ma_ribbon:      { ema: true,  bb: false },
+  rsi_divergence: { ema: false, bb: true  },
+  double_bottom:  { ema: true,  bb: true  },
+  head_shoulders: { ema: false, bb: false },
+  pin_bar:        { ema: true,  bb: false },
+  engulfing:      { ema: true,  bb: false },
+  bb_squeeze:     { ema: true,  bb: true  },
+  donchian:       { ema: false, bb: false },
+  orb:            { ema: false, bb: false },
+  order_block:    { ema: true,  bb: false },
+  liquidity_grab: { ema: false, bb: false },
+  fvg:            { ema: false, bb: false },
+  structure_break:{ ema: true,  bb: false },
+  macd_cross:     { ema: true,  bb: false },
+  stoch_rsi:      { ema: false, bb: true  },
+  vpa:            { ema: true,  bb: false },
+  rsi_reversal:   { ema: false, bb: true  },
+  keltner:        { ema: true,  bb: false },
+  news_trade:     { ema: false, bb: false },
+  news_confluence:{ ema: true,  bb: false },
+  mtf_analysis:   { ema: true,  bb: false },
+  weekly_level:   { ema: true,  bb: false },
 };
 
 const TF_TO_BINANCE: Record<string, string> = { '5m': '5m', '15m': '15m', '1h': '1h', '4h': '4h', '1D': '1d' };

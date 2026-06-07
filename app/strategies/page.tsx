@@ -1,6 +1,6 @@
 import Sidebar from '@/components/layout/Sidebar';
 import TopBar from '@/components/layout/TopBar';
-import StrategyMatcher from '@/components/strategy/StrategyMatcher';
+import StrategyLibrary from '@/components/strategy/StrategyLibrary';
 
 export default function StrategiesPage() {
   return (
@@ -11,10 +11,10 @@ export default function StrategiesPage() {
         <main className="flex-1 overflow-y-auto p-6">
           <div className="max-w-screen-xl mx-auto space-y-6">
             <div>
-              <h1 className="text-2xl font-bold text-white mb-1">Strategy Matcher</h1>
-              <p className="text-slate-500 text-sm">Best strategy matched to each pair based on current market conditions</p>
+              <h1 className="text-2xl font-bold text-white mb-1">Strategy Library</h1>
+              <p className="text-slate-500 text-sm">25 trading strategies across 8 categories — filter by category, difficulty, or search</p>
             </div>
-            <StrategyMatcher />
+            <StrategyLibrary />
           </div>
         </main>
       </div>
