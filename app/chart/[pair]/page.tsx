@@ -97,6 +97,32 @@ export default function ChartPage({ params }: { params: Promise<{ pair: string }
           }))
           .filter(c => c.close > 0 && c.time > 0);
         setDataSource(`Binance (${interval})`);
+      } else if (pair.market === 'forex' && pair.base && pair.quote) {
+        // Fetch Frankfurter directly from browser (supports CORS)
+        const end   = new Date();
+        const start = new Date();
+        start.setDate(start.getDate() - 180);
+        const fmt = (d: Date) => d.toISOString().split('T')[0];
+        const res = await fetch(
+          `https://api.frankfurter.app/${fmt(start)}..${fmt(end)}?from=${pair.base}&to=${pair.quote}`
+        );
+        if (!res.ok) throw new Error('Frankfurter error');
+        const fx = await res.json();
+        const entries = Object.entries(fx.rates as Record<string, Record<string, number>>);
+        const closes = entries.map(([date, rates]) => ({
+          time: Math.floor(new Date(date).getTime() / 1000),
+          close: (rates as Record<string, number>)[pair.quote!],
+        }));
+        data = closes.map((c, i) => {
+          const prevClose = i > 0 ? closes[i - 1].close : c.close;
+          const open  = prevClose;
+          const range = Math.abs(c.close - open) * 1.5 + c.close * 0.001;
+          return {
+            time: c.time, open, high: Math.max(open, c.close) + range * 0.4,
+            low: Math.min(open, c.close) - range * 0.4, close: c.close, volume: 0,
+          };
+        });
+        setDataSource('Frankfurter/ECB');
       } else {
         const res = await fetch(`/api/ohlcv/${pairId}?tf=${tf}`);
         if (!res.ok) throw new Error('API error');
