@@ -2,6 +2,37 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getPairById } from '@/lib/pairConfig';
 import { fetchCryptoOHLCV, fetchForexOHLCV, fetchStockOHLCV, fetchBinanceOHLCV } from '@/lib/dataFetchers';
 
+// Binance interval strings
+const TF_BINANCE: Record<string, string> = {
+  '1m': '1m', '3m': '3m', '5m': '5m', '15m': '15m', '30m': '30m',
+  '1h': '1h', '2h': '2h', '4h': '4h', '6h': '6h', '12h': '12h',
+  '1D': '1d', '1W': '1w', '1M': '1M',
+};
+
+// Yahoo Finance interval + range combos
+const TF_YAHOO: Record<string, { interval: string; range: string }> = {
+  '1m':  { interval: '1m',  range: '5d'  },
+  '3m':  { interval: '2m',  range: '5d'  },
+  '5m':  { interval: '5m',  range: '5d'  },
+  '15m': { interval: '15m', range: '5d'  },
+  '30m': { interval: '30m', range: '1mo' },
+  '1h':  { interval: '60m', range: '1mo' },
+  '2h':  { interval: '60m', range: '3mo' },
+  '4h':  { interval: '60m', range: '3mo' },
+  '6h':  { interval: '1d',  range: '6mo' },
+  '12h': { interval: '1d',  range: '6mo' },
+  '1D':  { interval: '1d',  range: '1y'  },
+  '1W':  { interval: '1wk', range: '5y'  },
+  '1M':  { interval: '1mo', range: 'max' },
+};
+
+// CoinGecko days to fetch
+const TF_CG_DAYS: Record<string, number> = {
+  '1m': 1, '3m': 1, '5m': 1, '15m': 1, '30m': 2,
+  '1h': 3, '2h': 7, '4h': 14, '6h': 14, '12h': 30,
+  '1D': 90, '1W': 365, '1M': 365,
+};
+
 export async function GET(req: NextRequest, { params }: { params: Promise<{ pair: string }> }) {
   const { pair: pairId } = await params;
   const pair = getPairById(pairId);
@@ -11,29 +42,25 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ pair
 
   try {
     let ohlcv;
-    const ivMap: Record<string, string> = { '5m': '5m', '15m': '15m', '1h': '1h', '4h': '4h', '1D': '1d' };
-    const daysMap: Record<string, number> = { '5m': 1, '15m': 1, '1h': 1, '4h': 7, '1D': 30 };
-    const rangeMap: Record<string, string> = { '5m': '5d', '15m': '5d', '1h': '1mo', '4h': '3mo', '1D': '1y' };
 
     if (pair.market === 'crypto') {
-      // Try Binance first, fall back to CoinGecko on any error (Binance is blocked in some regions)
       if (pair.binanceSymbol) {
         try {
-          ohlcv = await fetchBinanceOHLCV(pair.binanceSymbol, ivMap[tf] ?? '1h', 150);
+          ohlcv = await fetchBinanceOHLCV(pair.binanceSymbol, TF_BINANCE[tf] ?? '1h', 200);
           if (!Array.isArray(ohlcv) || ohlcv.length === 0) throw new Error('empty');
         } catch {
           if (pair.coinGeckoId) {
-            ohlcv = await fetchCryptoOHLCV(pair.coinGeckoId, Math.max(daysMap[tf] ?? 1, 14));
+            ohlcv = await fetchCryptoOHLCV(pair.coinGeckoId, Math.max(TF_CG_DAYS[tf] ?? 14, 14));
           }
         }
       } else if (pair.coinGeckoId) {
-        ohlcv = await fetchCryptoOHLCV(pair.coinGeckoId, Math.max(daysMap[tf] ?? 1, 14));
+        ohlcv = await fetchCryptoOHLCV(pair.coinGeckoId, Math.max(TF_CG_DAYS[tf] ?? 14, 14));
       }
     } else if (pair.market === 'forex' && pair.base && pair.quote) {
-      // Fetch 90 days to get enough candles for reliable indicator calculations
       ohlcv = await fetchForexOHLCV(pair.base, pair.quote, 90);
     } else if ((pair.market === 'stocks' || pair.market === 'commodities' || pair.market === 'indices') && pair.ticker) {
-      ohlcv = await fetchStockOHLCV(pair.ticker, ivMap[tf] ?? '1d', rangeMap[tf] ?? '1mo');
+      const yf = TF_YAHOO[tf] ?? { interval: '1d', range: '1y' };
+      ohlcv = await fetchStockOHLCV(pair.ticker, yf.interval, yf.range);
     } else {
       return NextResponse.json({ error: 'Unsupported pair' }, { status: 400 });
     }

@@ -13,12 +13,21 @@ import { calculateSignal, type SignalResult, type OHLCV } from '@/lib/signalEngi
 import { calculateLevels, type TradeLevels } from '@/lib/levelCalculator';
 import { getBestStrategy, type Strategy } from '@/lib/strategyMatcher';
 import { runBacktest, STRATEGY_KEYS, type StrategyKey, type BacktestResult, type BacktestTrade } from '@/lib/backtester';
+import type { ChartStyle } from '@/components/chart/LiveChart';
 
 const LiveChart = dynamic(() => import('@/components/chart/LiveChart'), { ssr: false });
 
-const TFS = ['5m', '15m', '1h', '4h', '1D'] as const;
+const TFS = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '12h', '1D', '1W', '1M'] as const;
 type TF = typeof TFS[number];
 type Tab = 'signal' | 'strategy';
+
+const CHART_STYLES: { key: ChartStyle; label: string; icon: string }[] = [
+  { key: 'candles',     label: 'Candles',     icon: '▤' },
+  { key: 'heikin-ashi', label: 'Heikin-Ashi', icon: '▥' },
+  { key: 'bars',        label: 'Bars',        icon: '▦' },
+  { key: 'line',        label: 'Line',        icon: '╱' },
+  { key: 'area',        label: 'Area',        icon: '▲' },
+];
 
 export default function ChartPage({ params }: { params: Promise<{ pair: string }> }) {
   const { pair: pairId } = use(params);
@@ -26,6 +35,7 @@ export default function ChartPage({ params }: { params: Promise<{ pair: string }
   const router = useRouter();
 
   const [tf, setTf]           = useState<TF>('1h');
+  const [chartStyle, setChartStyle] = useState<ChartStyle>('candles');
   const [tab, setTab]         = useState<Tab>('signal');
   const [tradeType, setTradeType] = useState<'auto' | 'long' | 'short'>('auto');
   const [ohlcv, setOhlcv]     = useState<OHLCV[]>([]);
@@ -201,11 +211,21 @@ export default function ChartPage({ params }: { params: Promise<{ pair: string }
                 </button>
               </div>
 
-              {/* Timeframes */}
+              {/* Chart style picker */}
               <div className="flex items-center gap-0.5 bg-white/3 border border-white/6 rounded-xl p-1">
+                {CHART_STYLES.map(s => (
+                  <button key={s.key} onClick={() => setChartStyle(s.key)} title={s.label}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition-all duration-150 ${chartStyle === s.key ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : 'text-slate-500 hover:text-slate-300'}`}>
+                    {s.icon}
+                  </button>
+                ))}
+              </div>
+
+              {/* Timeframes */}
+              <div className="flex items-center gap-0.5 bg-white/3 border border-white/6 rounded-xl p-1 flex-wrap">
                 {TFS.map(t => (
                   <button key={t} onClick={() => setTf(t)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-mono font-medium cursor-pointer transition-all duration-150 ${tf === t ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'text-slate-500 hover:text-slate-300'}`}>
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-mono font-medium cursor-pointer transition-all duration-150 ${tf === t ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'text-slate-500 hover:text-slate-300'}`}>
                     {t}
                   </button>
                 ))}
@@ -222,6 +242,7 @@ export default function ChartPage({ params }: { params: Promise<{ pair: string }
                 selectedStrategy={selectedStrategy}
                 backtestTrades={activeTrades}
                 timeframe={tf}
+                chartStyle={chartStyle}
               />
             </div>
           </div>
