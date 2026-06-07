@@ -340,6 +340,18 @@ export default function WhaleTracker() {
   const totalVol = buyVol + sellVol;
   const buyPct  = totalVol > 0 ? Math.round((buyVol / totalVol) * 100) : 50;
 
+  // Per-coin volume stats for the bar chart
+  const coinStats: Record<string, { buy: number; sell: number; transfer: number }> = {};
+  for (const m of moves) {
+    if (!coinStats[m.symbol]) coinStats[m.symbol] = { buy: 0, sell: 0, transfer: 0 };
+    coinStats[m.symbol][m.type] += m.usd;
+  }
+  const topCoins = Object.entries(coinStats)
+    .map(([sym, v]) => ({ sym, total: v.buy + v.sell + v.transfer, buy: v.buy, sell: v.sell }))
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 8);
+  const maxCoinVol = topCoins[0]?.total ?? 1;
+
   return (
     <div className="bg-white/2 border border-white/8 rounded-2xl overflow-hidden flex flex-col">
       {/* Header */}
@@ -383,6 +395,42 @@ export default function WhaleTracker() {
           <div className="flex h-1.5 rounded-full overflow-hidden">
             <div className="bg-emerald-500 transition-all duration-1000" style={{ width: `${buyPct}%` }} />
             <div className="bg-red-500 transition-all duration-1000"     style={{ width: `${100 - buyPct}%` }} />
+          </div>
+        </div>
+      )}
+
+      {/* Coin activity chart */}
+      {topCoins.length > 0 && (
+        <div className="px-4 py-3 border-b border-white/5 flex-shrink-0">
+          <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-2">Whale Volume by Coin</div>
+          <div className="space-y-1.5">
+            {topCoins.map(c => {
+              const buyPct  = c.total > 0 ? (c.buy  / c.total) * 100 : 0;
+              const sellPct = c.total > 0 ? (c.sell / c.total) * 100 : 0;
+              const barW    = Math.max(4, (c.total / maxCoinVol) * 100);
+              return (
+                <div key={c.sym}>
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <span className="font-mono text-xs font-bold text-white w-10 flex-shrink-0">{c.sym}</span>
+                    <div className="flex-1 h-3 bg-white/4 rounded-full overflow-hidden">
+                      <div className="h-full flex rounded-full overflow-hidden" style={{ width: `${barW}%` }}>
+                        <div className="bg-emerald-500" style={{ width: `${buyPct}%` }} />
+                        <div className="bg-red-500"     style={{ width: `${sellPct}%` }} />
+                        {(100 - buyPct - sellPct) > 0 && (
+                          <div className="bg-orange-500/60" style={{ width: `${100 - buyPct - sellPct}%` }} />
+                        )}
+                      </div>
+                    </div>
+                    <span className="text-[10px] font-mono text-slate-400 w-14 text-right flex-shrink-0">{fmtUSD(c.total)}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="flex items-center gap-3 mt-2 text-[9px] text-slate-600">
+            <span className="flex items-center gap-1"><span className="w-2 h-1 bg-emerald-500 rounded inline-block"/>Buy</span>
+            <span className="flex items-center gap-1"><span className="w-2 h-1 bg-red-500 rounded inline-block"/>Sell</span>
+            <span className="flex items-center gap-1"><span className="w-2 h-1 bg-orange-500/60 rounded inline-block"/>On-chain</span>
           </div>
         </div>
       )}

@@ -94,16 +94,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ pair
         }
       }
 
-    // ── FOREX: Frankfurter (ECB) — daily only ────────────────────────────────
-    } else if (pair.market === 'forex' && pair.base && pair.quote) {
-      ohlcv = await fetchForexOHLCV(pair.base, pair.quote, 90);
-      dataSource = 'Frankfurter/ECB (daily bars — intraday not available free)';
-
-    // ── STOCKS / INDICES / COMMODITIES: Yahoo Finance ─────────────────────────
-    } else if (
-      (pair.market === 'stocks' || pair.market === 'commodities' || pair.market === 'indices') &&
-      pair.ticker
-    ) {
+    // ── FOREX / STOCKS / INDICES / COMMODITIES: Yahoo Finance ────────────────
+    // Forex pairs now use Yahoo Finance tickers (EURUSD=X) for intraday data.
+    // Frankfurter is no longer used — Yahoo gives 1h/4h/daily for all forex pairs.
+    } else if (pair.ticker) {
       const yfCfg = TF_YAHOO[tf] ?? { interval: '1d', range: '1y' };
       ohlcv = await fetchStockOHLCV(pair.ticker, yfCfg.interval, yfCfg.range);
 
