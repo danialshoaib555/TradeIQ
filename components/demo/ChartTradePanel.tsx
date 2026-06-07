@@ -30,7 +30,9 @@ export default function ChartTradePanel({ pair, signal, levels, livePrice }: Pro
     signal?.signal === 'SELL' ? 'SHORT' : 'LONG'
   );
   const [tpTarget, setTpTarget] = useState<TpTarget>('tp2');
+  const [riskMode, setRiskMode] = useState<'pct' | 'usd'>('pct');
   const [riskPct, setRiskPct] = useState('2');
+  const [riskUsd, setRiskUsd] = useState('');
   const [emotion, setEmotion] = useState<EmotionTag>('disciplined');
   const [submitted, setSubmitted] = useState(false);
   const [manualEntry, setManualEntry] = useState('');
@@ -50,7 +52,9 @@ export default function ChartTradePanel({ pair, signal, levels, livePrice }: Pro
     ? (tpTarget === 'tp1' ? levels!.tp1 : tpTarget === 'tp2' ? levels!.tp2 : levels!.tp3)
     : parseFloat(manualTp) || 0;
 
-  const riskAmount = (parseFloat(riskPct) / 100) * balance;
+  const riskAmount = riskMode === 'usd'
+    ? Math.min(parseFloat(riskUsd) || 0, balance)
+    : (parseFloat(riskPct) / 100) * balance;
   const slPips  = slVal && entryVal ? Math.abs(entryVal - slVal) / pipSize : 0;
   const tpPips  = tpVal && entryVal ? Math.abs(tpVal - entryVal) / pipSize : 0;
   const rr      = slPips > 0 && tpPips > 0 ? tpPips / slPips : 0;
@@ -231,25 +235,78 @@ export default function ChartTradePanel({ pair, signal, levels, livePrice }: Pro
         </div>
       )}
 
-      {/* Risk % */}
+      {/* Risk input */}
       <div>
-        <div className="flex items-center justify-between mb-1">
-          <p className="text-xs text-slate-500">Risk %</p>
-          <p className="text-xs text-slate-500">${(parseFloat(riskPct) / 100 * balance).toFixed(0)} at risk</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <input value={riskPct} onChange={e => setRiskPct(e.target.value)}
-            type="number" min="0.1" max="10" step="0.5"
-            className="w-20 bg-slate-900/60 border border-white/8 rounded-lg px-2 py-1.5 text-xs text-white outline-none focus:border-emerald-500/30" />
-          <div className="flex gap-1 flex-1">
-            {['1', '2', '3', '5'].map(v => (
-              <button key={v} onClick={() => setRiskPct(v)}
-                className={`flex-1 py-1 rounded text-xs transition-all ${riskPct === v ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/25' : 'bg-slate-900/40 text-slate-500 hover:text-slate-300 border border-white/5'}`}>
-                {v}%
-              </button>
-            ))}
+        <div className="flex items-center justify-between mb-1.5">
+          <p className="text-xs text-slate-500">Amount to risk</p>
+          {/* Mode toggle */}
+          <div className="flex rounded-lg overflow-hidden border border-white/8 text-xs">
+            <button onClick={() => setRiskMode('usd')}
+              className={`px-2 py-0.5 transition-all ${riskMode === 'usd' ? 'bg-emerald-500/20 text-emerald-400' : 'text-slate-500 hover:text-slate-300'}`}>
+              $
+            </button>
+            <button onClick={() => setRiskMode('pct')}
+              className={`px-2 py-0.5 transition-all ${riskMode === 'pct' ? 'bg-emerald-500/20 text-emerald-400' : 'text-slate-500 hover:text-slate-300'}`}>
+              %
+            </button>
           </div>
         </div>
+
+        {riskMode === 'usd' ? (
+          <div className="space-y-1.5">
+            <div className="relative">
+              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400">$</span>
+              <input
+                value={riskUsd}
+                onChange={e => setRiskUsd(e.target.value)}
+                type="number" min="1" max={balance} step="10"
+                placeholder={`e.g. ${Math.round(balance * 0.02)}`}
+                className="w-full bg-slate-900/60 border border-white/8 rounded-lg pl-6 pr-3 py-1.5 text-xs text-white font-mono outline-none focus:border-emerald-500/30"
+              />
+            </div>
+            {/* Quick $ presets */}
+            <div className="flex gap-1">
+              {[50, 100, 200, 500].filter(v => v <= balance).map(v => (
+                <button key={v} onClick={() => setRiskUsd(String(v))}
+                  className={`flex-1 py-1 rounded text-xs transition-all border ${
+                    parseFloat(riskUsd) === v
+                      ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/25'
+                      : 'bg-slate-900/40 text-slate-500 hover:text-slate-300 border-white/5'
+                  }`}>
+                  ${v}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-slate-600">
+              = {riskUsd && balance ? ((parseFloat(riskUsd) / balance) * 100).toFixed(1) : '0.0'}% of ${balance.toFixed(0)} balance
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            <div className="relative">
+              <input value={riskPct} onChange={e => setRiskPct(e.target.value)}
+                type="number" min="0.1" max="100" step="0.5"
+                className="w-full bg-slate-900/60 border border-white/8 rounded-lg px-3 pr-6 py-1.5 text-xs text-white font-mono outline-none focus:border-emerald-500/30" />
+              <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400">%</span>
+            </div>
+            {/* Quick % presets */}
+            <div className="flex gap-1">
+              {['1', '2', '5', '10'].map(v => (
+                <button key={v} onClick={() => setRiskPct(v)}
+                  className={`flex-1 py-1 rounded text-xs transition-all border ${
+                    riskPct === v
+                      ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/25'
+                      : 'bg-slate-900/40 text-slate-500 hover:text-slate-300 border-white/5'
+                  }`}>
+                  {v}%
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-slate-600">
+              = ${riskAmount.toFixed(2)} of ${balance.toFixed(0)} balance
+            </p>
+          </div>
+        )}
       </div>
 
       {/* R:R preview */}
