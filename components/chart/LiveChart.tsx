@@ -109,12 +109,90 @@ export default function LiveChart({ pair, levels, signal, tradeType = 'auto', se
     setReady(false);
     setOhlcv([]);
     setLivePrice(null);
-    fetch(`/api/ohlcv/${pair.id}?tf=${timeframe}`)
-      .then(r => r.json())
-      .then(data => { if (Array.isArray(data)) setOhlcv(data); })
-      .catch(() => {})
-      .finally(() => setReady(true));
-  }, [pair.id, timeframe]);
+
+    const TF_BINANCE_INTERVAL: Record<string, string> = {
+      '1m':'1m','3m':'3m','5m':'5m','15m':'15m','30m':'30m',
+      '1h':'1h','2h':'2h','4h':'4h','6h':'6h','12h':'12h',
+      '1D':'1d','1W':'1w','1M':'1M',
+    };
+    const TF_LIMIT: Record<string, number> = {
+      '1m':300,'3m':300,'5m':300,'15m':400,'30m':500,
+      '1h':500,'2h':500,'4h':500,'6h':500,'12h':500,
+      '1D':365,'1W':200,'1M':60,
+    };
+    const TF_YAHOO: Record<string, { interval: string; range: string; factor?: number }> = {
+      '1m':  { interval: '1m',  range: '7d'  },
+      '3m':  { interval: '2m',  range: '7d'  },
+      '5m':  { interval: '5m',  range: '7d'  },
+      '15m': { interval: '15m', range: '7d'  },
+      '30m': { interval: '30m', range: '1mo' },
+      '1h':  { interval: '60m', range: '2mo' },
+      '2h':  { interval: '60m', range: '3mo', factor: 2 },
+      '4h':  { interval: '60m', range: '6mo', factor: 4 },
+      '6h':  { interval: '60m', range: '6mo', factor: 6 },
+      '12h': { interval: '1d',  range: '1y'  },
+      '1D':  { interval: '1d',  range: '1y'  },
+      '1W':  { interval: '1wk', range: '5y'  },
+      '1M':  { interval: '1mo', range: 'max' },
+    };
+
+    async function loadCandles() {
+      try {
+        let candles: OHLCVBar[] = [];
+
+        if (pair.market === 'crypto' && pair.binanceSymbol) {
+          // ── Fetch directly from Binance (browser → Binance, no CORS issues) ──
+          const interval = TF_BINANCE_INTERVAL[timeframe] ?? '1h';
+          const limit    = TF_LIMIT[timeframe] ?? 500;
+          const url = `https://api.binance.com/api/v3/klines?symbol=${pair.binanceSymbol.toUpperCase()}&interval=${interval}&limit=${limit}`;
+          const res  = await fetch(url);
+          if (!res.ok) throw new Error(`Binance ${res.status}`);
+          const raw: string[][] = await res.json();
+          candles = raw
+            .map(k => ({
+              time:   Math.floor(parseInt(k[0]) / 1000),
+              open:   parseFloat(k[1]),
+              high:   parseFloat(k[2]),
+              low:    parseFloat(k[3]),
+              close:  parseFloat(k[4]),
+              volume: parseFloat(k[5]),
+            }))
+            .filter(c => c.close > 0 && c.time > 0);
+
+        } else if (pair.market === 'forex' && pair.base && pair.quote) {
+          // ── Forex: use our API route (Frankfurter has CORS) ──
+          const res  = await fetch(`/api/ohlcv/${pair.id}?tf=${timeframe}`);
+          if (!res.ok) throw new Error('Forex API error');
+          candles = await res.json();
+
+        } else if (pair.ticker) {
+          // ── Stocks/indices/commodities: fetch Yahoo Finance via API route ──
+          // (Yahoo has CORS restrictions, must go through server)
+          const res  = await fetch(`/api/ohlcv/${pair.id}?tf=${timeframe}`);
+          if (!res.ok) throw new Error('Stock API error');
+          candles = await res.json();
+          // Apply aggregation if needed (2h/4h/6h)
+          const factor = TF_YAHOO[timeframe]?.factor;
+          if (factor && factor > 1) {
+            const out: OHLCVBar[] = [];
+            for (let i = 0; i + factor <= candles.length; i += factor) {
+              const g = candles.slice(i, i + factor);
+              out.push({ time: g[0].time, open: g[0].open, high: Math.max(...g.map(c => c.high)), low: Math.min(...g.map(c => c.low)), close: g[g.length-1].close, volume: g.reduce((s,c) => s + c.volume, 0) });
+            }
+            candles = out;
+          }
+        }
+
+        if (Array.isArray(candles) && candles.length > 0) setOhlcv(candles);
+      } catch (e) {
+        console.error('Chart load error:', e);
+      } finally {
+        setReady(true);
+      }
+    }
+
+    loadCandles();
+  }, [pair.id, pair.market, pair.binanceSymbol, pair.base, pair.quote, pair.ticker, timeframe]);
 
   useEffect(() => {
     if (!ready || !containerRef.current || ohlcv.length === 0) return;
