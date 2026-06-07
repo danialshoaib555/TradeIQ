@@ -159,47 +159,14 @@ export default function LiveChart({ pair, levels, signal, tradeType = 'auto', se
             }))
             .filter(c => c.close > 0 && c.time > 0);
 
-        } else if (pair.market === 'forex' && pair.base && pair.quote) {
-          // ── Forex: fetch Frankfurter directly from browser (supports CORS) ──
-          const end   = new Date();
-          const start = new Date();
-          start.setDate(start.getDate() - 180);
-          const fmt = (d: Date) => d.toISOString().split('T')[0];
-          const res = await fetch(
-            `https://api.frankfurter.app/${fmt(start)}..${fmt(end)}?from=${pair.base}&to=${pair.quote}`
-          );
-          if (!res.ok) throw new Error('Frankfurter error');
-          const data = await res.json();
-          const entries = Object.entries(data.rates as Record<string, Record<string, number>>);
-          const closes = entries.map(([date, rates]) => ({
-            time:  Math.floor(new Date(date).getTime() / 1000),
-            close: rates[pair.quote!],
-          }));
-          candles = closes.map((c, i) => {
-            const prevClose = i > 0 ? closes[i - 1].close : c.close;
-            const open  = prevClose;
-            const range = Math.abs(c.close - open) * 1.5 + c.close * 0.001;
-            const high  = Math.max(open, c.close) + range * 0.4;
-            const low   = Math.min(open, c.close) - range * 0.4;
-            return { time: c.time, open, high, low, close: c.close, volume: 0 };
-          });
-
-        } else if (pair.ticker) {
-          // ── Stocks/indices/commodities: fetch Yahoo Finance via API route ──
-          // (Yahoo has CORS restrictions, must go through server)
-          const res  = await fetch(`/api/ohlcv/${pair.id}?tf=${timeframe}`);
-          if (!res.ok) throw new Error('Stock API error');
+        } else if (pair.market === 'forex' || pair.ticker) {
+          // ── Forex/Stocks: use server API route ──
+          // Frankfurter (forex) and Yahoo Finance (stocks) work fine from Vercel servers.
+          // Only Binance was being blocked, which is handled above.
+          const res = await fetch(`/api/ohlcv/${pair.id}?tf=${timeframe}`);
+          if (!res.ok) throw new Error('API route error');
           candles = await res.json();
-          // Apply aggregation if needed (2h/4h/6h)
-          const factor = TF_YAHOO[timeframe]?.factor;
-          if (factor && factor > 1) {
-            const out: OHLCVBar[] = [];
-            for (let i = 0; i + factor <= candles.length; i += factor) {
-              const g = candles.slice(i, i + factor);
-              out.push({ time: g[0].time, open: g[0].open, high: Math.max(...g.map(c => c.high)), low: Math.min(...g.map(c => c.low)), close: g[g.length-1].close, volume: g.reduce((s,c) => s + c.volume, 0) });
-            }
-            candles = out;
-          }
+
         }
 
         if (Array.isArray(candles) && candles.length > 0) setOhlcv(candles);

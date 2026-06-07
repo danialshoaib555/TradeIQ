@@ -1,67 +1,63 @@
 'use client';
 import { useState, useEffect, useRef, useCallback } from 'react';
 
-interface Trade {
+interface WhaleMove {
   id: string;
+  type: 'buy' | 'sell' | 'transfer';
   symbol: string;
-  type: 'buy' | 'sell';
-  price: number;
-  qty: number;
   usd: number;
   usdDisplay: string;
-  exchange: string;
+  qty: string;
+  exchange: string;       // exchange name OR 'On-Chain BTC' / 'On-Chain ETH'
+  wallet?: string;        // truncated wallet/tx hash for on-chain
+  txHash?: string;
   time: Date;
   timeAgo: string;
-  tag: 'mega' | 'whale' | 'large' | 'normal';
+  tag: 'mega' | 'whale' | 'large';
 }
-
-interface SymbolStats { buy: number; sell: number; trades: number }
 
 function fmtUSD(v: number) {
   if (v >= 1e9) return '$' + (v / 1e9).toFixed(2) + 'B';
   if (v >= 1e6) return '$' + (v / 1e6).toFixed(2) + 'M';
-  if (v >= 1e3) return '$' + (v / 1e3).toFixed(0) + 'K';
-  return '$' + v.toFixed(0);
+  return '$' + (v / 1e3).toFixed(0) + 'K';
 }
 
-function getTag(usd: number): Trade['tag'] {
+function getTag(usd: number): WhaleMove['tag'] {
   if (usd >= 10_000_000) return 'mega';
-  if (usd >= 1_000_000)  return 'whale';
-  if (usd >= 100_000)    return 'large';
-  return 'normal';
+  if (usd >= 5_000_000)  return 'whale';
+  return 'large';
 }
 
-function tagStyle(tag: Trade['tag']) {
-  if (tag === 'mega')  return 'text-yellow-300 bg-yellow-500/20 border-yellow-500/40';
-  if (tag === 'whale') return 'text-purple-300 bg-purple-500/20 border-purple-500/40';
-  if (tag === 'large') return 'text-blue-300 bg-blue-500/20 border-blue-500/30';
-  return '';
+function tagStyle(tag: WhaleMove['tag']) {
+  if (tag === 'mega')  return 'text-yellow-300 bg-yellow-500/15 border-yellow-500/40';
+  if (tag === 'whale') return 'text-purple-300 bg-purple-500/15 border-purple-500/40';
+  return 'text-blue-300 bg-blue-500/10 border-blue-500/30';
 }
 
-function tagLabel(tag: Trade['tag']) {
+function tagLabel(tag: WhaleMove['tag']) {
   if (tag === 'mega')  return '🐳 MEGA';
   if (tag === 'whale') return '🐋 WHALE';
-  if (tag === 'large') return '🦈 LARGE';
-  return null;
+  return '🦈 LARGE';
 }
 
 function ago(t: Date, now: Date) {
   const d = Math.floor((now.getTime() - t.getTime()) / 1000);
-  if (d < 5)   return 'now';
-  if (d < 60)  return d + 's ago';
-  if (d < 3600) return Math.floor(d / 60) + 'm ago';
-  return Math.floor(d / 3600) + 'h ago';
+  if (d < 10)   return 'now';
+  if (d < 60)   return d + 's';
+  if (d < 3600) return Math.floor(d / 60) + 'm';
+  return Math.floor(d / 3600) + 'h';
 }
 
-// ── All symbols we track across exchanges ───────────────────────────────────
-const SYMBOLS = ['BTC','ETH','SOL','XRP','BNB','ADA','DOGE','AVAX','DOT','MATIC','LINK','UNI','ATOM','LTC','TRX','SHIB','TON','NEAR','APT','ARB'];
+function shortAddr(s: string) {
+  if (!s) return '';
+  return s.slice(0, 6) + '…' + s.slice(-4);
+}
 
-const EXCHANGE_COLORS: Record<string, string> = {
-  Binance: 'text-amber-400', Bybit: 'text-orange-400',
-  OKX: 'text-blue-400', Coinbase: 'text-blue-300', Kraken: 'text-purple-400',
-};
+// ── Exchange CEX configs — trades $1M+ only ─────────────────────────────────
+const CEX_SYMBOLS = ['BTC','ETH','SOL','XRP','BNB','ADA','DOGE','AVAX','DOT','MATIC'];
 
-// ── Exchange WebSocket configs ───────────────────────────────────────────────
+const CEX_MIN_USD = 1_000_000; // $1M minimum for exchange trades
+
 interface ExCfg {
   name: string;
   url: string;
@@ -72,7 +68,7 @@ interface ExCfg {
 const EXCHANGES: ExCfg[] = [
   {
     name: 'Binance',
-    url: `wss://stream.binance.com:9443/stream?streams=${SYMBOLS.map(s => s.toLowerCase() + 'usdt@aggTrade').join('/')}`,
+    url: `wss://stream.binance.com:9443/stream?streams=${CEX_SYMBOLS.map(s => s.toLowerCase() + 'usdt@aggTrade').join('/')}`,
     onOpen: () => {},
     parse: (raw) => {
       try {
@@ -86,7 +82,7 @@ const EXCHANGES: ExCfg[] = [
     name: 'Bybit',
     url: 'wss://stream.bybit.com/v5/public/spot',
     onOpen: (ws) => {
-      const args = ['BTC','ETH','SOL','XRP','BNB','ADA','DOGE','AVAX','DOT'].map(s => `publicTrade.${s}USDT`);
+      const args = ['BTC','ETH','SOL','XRP','BNB','ADA'].map(s => `publicTrade.${s}USDT`);
       ws.send(JSON.stringify({ op: 'subscribe', args }));
     },
     parse: (raw) => {
@@ -104,7 +100,7 @@ const EXCHANGES: ExCfg[] = [
     name: 'OKX',
     url: 'wss://ws.okx.com:8443/ws/v5/public',
     onOpen: (ws) => {
-      const args = ['BTC','ETH','SOL','XRP','ADA','DOGE','DOT','AVAX','LINK','ATOM'].map(s => ({ channel: 'trades', instId: `${s}-USDT` }));
+      const args = ['BTC','ETH','SOL','XRP','ADA','DOT'].map(s => ({ channel: 'trades', instId: `${s}-USDT` }));
       ws.send(JSON.stringify({ op: 'subscribe', args }));
     },
     parse: (raw) => {
@@ -113,8 +109,7 @@ const EXCHANGES: ExCfg[] = [
         if (!msg.data || !Array.isArray(msg.data)) return null;
         const t = msg.data[0];
         if (!t?.instId) return null;
-        const symbol = t.instId.replace('-USDT','');
-        return { symbol, price: parseFloat(t.px), qty: parseFloat(t.sz), isSell: t.side === 'sell', ts: Number(t.ts), id: `okx-${t.tradeId}` };
+        return { symbol: t.instId.replace('-USDT',''), price: parseFloat(t.px), qty: parseFloat(t.sz), isSell: t.side === 'sell', ts: Number(t.ts), id: `okx-${t.tradeId}` };
       } catch { return null; }
     },
   },
@@ -122,7 +117,7 @@ const EXCHANGES: ExCfg[] = [
     name: 'Coinbase',
     url: 'wss://advanced-trade-ws.coinbase.com',
     onOpen: (ws) => {
-      ws.send(JSON.stringify({ type: 'subscribe', product_ids: ['BTC-USD','ETH-USD','SOL-USD','XRP-USD','DOGE-USD','AVAX-USD','LTC-USD','LINK-USD'], channel: 'market_trades' }));
+      ws.send(JSON.stringify({ type: 'subscribe', product_ids: ['BTC-USD','ETH-USD','SOL-USD','XRP-USD','DOGE-USD'], channel: 'market_trades' }));
     },
     parse: (raw) => {
       try {
@@ -131,8 +126,7 @@ const EXCHANGES: ExCfg[] = [
         for (const ev of msg.events) {
           if (!ev.trades?.length) continue;
           const t = ev.trades[0];
-          const symbol = t.product_id.replace('-USD','');
-          return { symbol, price: parseFloat(t.price), qty: parseFloat(t.size), isSell: t.side === 'SELL', ts: new Date(t.time).getTime(), id: `cb-${t.trade_id}` };
+          return { symbol: t.product_id.replace('-USD',''), price: parseFloat(t.price), qty: parseFloat(t.size), isSell: t.side === 'SELL', ts: new Date(t.time).getTime(), id: `cb-${t.trade_id}` };
         }
         return null;
       } catch { return null; }
@@ -142,7 +136,7 @@ const EXCHANGES: ExCfg[] = [
     name: 'Kraken',
     url: 'wss://ws.kraken.com/v2',
     onOpen: (ws) => {
-      ws.send(JSON.stringify({ method: 'subscribe', params: { channel: 'trade', symbol: ['BTC/USD','ETH/USD','SOL/USD','XRP/USD','ADA/USD','DOT/USD'] } }));
+      ws.send(JSON.stringify({ method: 'subscribe', params: { channel: 'trade', symbol: ['BTC/USD','ETH/USD','SOL/USD','XRP/USD'] } }));
     },
     parse: (raw) => {
       try {
@@ -157,99 +151,194 @@ const EXCHANGES: ExCfg[] = [
   },
 ];
 
-// Minimum USD value to show in feed
-const MIN_USD = 10_000;
+const EX_COLORS: Record<string, string> = {
+  Binance: 'text-amber-400', Bybit: 'text-orange-400',
+  OKX: 'text-blue-400', Coinbase: 'text-blue-300', Kraken: 'text-purple-400',
+  'On-Chain BTC': 'text-orange-300', 'On-Chain ETH': 'text-indigo-300',
+};
+
+// Approximate BTC price for on-chain USD estimation (updated from last trade)
+let btcPriceRef = 100_000;
+let ethPriceRef = 3_500;
 
 export default function WhaleTracker() {
-  const [trades, setTrades]         = useState<Trade[]>([]);
-  const [stats, setStats]           = useState<Record<string, SymbolStats>>({});
-  const [connected, setConnected]   = useState<Record<string, boolean>>({});
+  const [moves, setMoves]         = useState<WhaleMove[]>([]);
+  const [connected, setConnected] = useState<Record<string, boolean>>({});
   const [sessionVol, setSessionVol] = useState(0);
-  const [filter, setFilter]         = useState<'all' | 'large' | 'whale'>('all');
-  const [symFilter, setSymFilter]   = useState<string>('ALL');
-  const tradesRef = useRef<Trade[]>([]);
+  const [filter, setFilter]       = useState<'all' | 'cex' | 'onchain'>('all');
+  const movesRef  = useRef<WhaleMove[]>([]);
   const wsRefs    = useRef<Map<string, WebSocket>>(new Map());
   const seenIds   = useRef<Set<string>>(new Set());
 
-  const addTrade = useCallback((exchange: string, raw: string) => {
-    const cfg = EXCHANGES.find(e => e.name === exchange);
-    if (!cfg) return;
-    const parsed = cfg.parse(raw);
-    if (!parsed) return;
-    const { symbol, price, qty, isSell, ts, id } = parsed;
-    if (!symbol || price <= 0 || qty <= 0) return;
-    if (seenIds.current.has(id)) return;
-    seenIds.current.add(id);
-    if (seenIds.current.size > 10000) {
+  const push = useCallback((move: WhaleMove) => {
+    if (seenIds.current.has(move.id)) return;
+    seenIds.current.add(move.id);
+    if (seenIds.current.size > 5000) {
       const arr = [...seenIds.current];
-      seenIds.current = new Set(arr.slice(2000));
+      seenIds.current = new Set(arr.slice(1000));
     }
-
-    const usd = price * qty;
-    if (usd < MIN_USD) return;
-
-    const now = new Date();
-    const trade: Trade = {
-      id, symbol, type: isSell ? 'sell' : 'buy',
-      price, qty, usd,
-      usdDisplay: fmtUSD(usd),
-      exchange,
-      time: new Date(ts || now),
-      timeAgo: 'now',
-      tag: getTag(usd),
-    };
-
-    tradesRef.current = [trade, ...tradesRef.current].slice(0, 100);
-    setTrades([...tradesRef.current]);
-    setStats(prev => {
-      const s = prev[symbol] ?? { buy: 0, sell: 0, trades: 0 };
-      return { ...prev, [symbol]: { buy: isSell ? s.buy : s.buy + usd, sell: isSell ? s.sell + usd : s.sell, trades: s.trades + 1 } };
-    });
-    setSessionVol(v => v + usd);
+    movesRef.current = [move, ...movesRef.current].slice(0, 80);
+    setMoves([...movesRef.current]);
+    setSessionVol(v => v + move.usd);
   }, []);
 
-  const connect = useCallback((cfg: ExCfg) => {
+  // ── CEX exchange feeds ───────────────────────────────────────────────────
+  const connectCEX = useCallback((cfg: ExCfg) => {
     if (typeof window === 'undefined') return;
     try {
       const ws = new WebSocket(cfg.url);
       wsRefs.current.set(cfg.name, ws);
       ws.onopen  = () => { cfg.onOpen(ws); setConnected(p => ({ ...p, [cfg.name]: true })); };
-      ws.onclose = () => { setConnected(p => ({ ...p, [cfg.name]: false })); setTimeout(() => connect(cfg), 5000); };
+      ws.onclose = () => { setConnected(p => ({ ...p, [cfg.name]: false })); setTimeout(() => connectCEX(cfg), 5000); };
       ws.onerror = () => ws.close();
-      ws.onmessage = (evt) => addTrade(cfg.name, evt.data);
+      ws.onmessage = (evt) => {
+        const parsed = cfg.parse(evt.data);
+        if (!parsed) return;
+        const { symbol, price, qty, isSell, ts, id } = parsed;
+        if (!symbol || price <= 0 || qty <= 0) return;
+        const usd = price * qty;
+        if (usd < CEX_MIN_USD) return;
+
+        // Track live prices for on-chain estimation
+        if (symbol === 'BTC') btcPriceRef = price;
+        if (symbol === 'ETH') ethPriceRef = price;
+
+        push({
+          id, type: isSell ? 'sell' : 'buy', symbol, usd,
+          usdDisplay: fmtUSD(usd),
+          qty: qty.toFixed(symbol === 'BTC' ? 4 : 2) + ' ' + symbol,
+          exchange: cfg.name,
+          time: new Date(ts || Date.now()),
+          timeAgo: 'now',
+          tag: getTag(usd),
+        });
+      };
     } catch {}
-  }, [addTrade]);
+  }, [push]);
+
+  // ── On-chain BTC via blockchain.info WebSocket ───────────────────────────
+  // Streams ALL unconfirmed BTC transactions in real-time
+  const connectBTCOnChain = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    const MIN_BTC = 5; // minimum 5 BTC (~$500K at $100K/BTC)
+    try {
+      const ws = new WebSocket('wss://ws.blockchain.info/inv');
+      wsRefs.current.set('btc-onchain', ws);
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ op: 'unconfirmed_sub' }));
+        setConnected(p => ({ ...p, 'On-Chain BTC': true }));
+      };
+      ws.onclose = () => {
+        setConnected(p => ({ ...p, 'On-Chain BTC': false }));
+        setTimeout(() => connectBTCOnChain(), 8000);
+      };
+      ws.onerror = () => ws.close();
+      ws.onmessage = (evt) => {
+        try {
+          const msg = JSON.parse(evt.data);
+          if (msg.op !== 'utx' || !msg.x) return;
+          const tx = msg.x;
+          // Total output value in satoshis (1 BTC = 1e8 satoshis)
+          const totalSats: number = (tx.out ?? []).reduce((sum: number, o: { value: number }) => sum + (o.value ?? 0), 0);
+          const btc = totalSats / 1e8;
+          if (btc < MIN_BTC) return;
+          const usd = btc * btcPriceRef;
+          if (usd < 500_000) return;
+
+          push({
+            id: `btc-${tx.hash}`,
+            type: 'transfer',
+            symbol: 'BTC',
+            usd,
+            usdDisplay: fmtUSD(usd),
+            qty: btc.toFixed(4) + ' BTC',
+            exchange: 'On-Chain BTC',
+            wallet: shortAddr(tx.hash ?? ''),
+            txHash: tx.hash,
+            time: new Date((tx.time ?? Math.floor(Date.now() / 1000)) * 1000),
+            timeAgo: 'now',
+            tag: getTag(usd),
+          });
+        } catch {}
+      };
+    } catch {}
+  }, [push]);
+
+  // ── On-chain via mempool.space (large confirmed BTC txns) ────────────────
+  const connectMempool = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const ws = new WebSocket('wss://mempool.space/api/v1/ws');
+      wsRefs.current.set('mempool', ws);
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ action: 'want', data: ['blocks'] }));
+        setConnected(p => ({ ...p, 'Mempool': true }));
+      };
+      ws.onclose = () => {
+        setConnected(p => ({ ...p, 'Mempool': false }));
+        setTimeout(() => connectMempool(), 10000);
+      };
+      ws.onerror = () => ws.close();
+      ws.onmessage = (evt) => {
+        try {
+          const msg = JSON.parse(evt.data);
+          // On new block, check for large transactions
+          if (msg.block?.tx) {
+            for (const tx of msg.block.tx.slice(0, 50)) {
+              const totalSats: number = (tx.vout ?? []).reduce((s: number, o: { value: number }) => s + (o.value ?? 0), 0);
+              const btc = totalSats / 1e8;
+              if (btc < 10) continue;
+              const usd = btc * btcPriceRef;
+              if (usd < 1_000_000) continue;
+              push({
+                id: `mp-${tx.txid}`,
+                type: 'transfer',
+                symbol: 'BTC',
+                usd,
+                usdDisplay: fmtUSD(usd),
+                qty: btc.toFixed(4) + ' BTC',
+                exchange: 'On-Chain BTC',
+                wallet: shortAddr(tx.txid ?? ''),
+                txHash: tx.txid,
+                time: new Date(),
+                timeAgo: 'now',
+                tag: getTag(usd),
+              });
+            }
+          }
+        } catch {}
+      };
+    } catch {}
+  }, [push]);
 
   useEffect(() => {
-    EXCHANGES.forEach(cfg => connect(cfg));
+    EXCHANGES.forEach(cfg => connectCEX(cfg));
+    connectBTCOnChain();
+    connectMempool();
+
     const tick = setInterval(() => {
       const now = new Date();
-      tradesRef.current = tradesRef.current.map(t => ({ ...t, timeAgo: ago(t.time, now) }));
-      setTrades([...tradesRef.current]);
-    }, 5000);
+      movesRef.current = movesRef.current.map(m => ({ ...m, timeAgo: ago(m.time, now) }));
+      setMoves([...movesRef.current]);
+    }, 10_000);
+
     return () => {
-      wsRefs.current.forEach(ws => ws.close());
+      wsRefs.current.forEach(ws => { try { ws.close(); } catch {} });
       clearInterval(tick);
     };
-  }, [connect]);
+  }, [connectCEX, connectBTCOnChain, connectMempool]);
 
-  const connCount = Object.values(connected).filter(Boolean).length;
+  const connCEX     = EXCHANGES.filter(e => connected[e.name]).length;
+  const connOnChain = (connected['On-Chain BTC'] ? 1 : 0) + (connected['Mempool'] ? 1 : 0);
 
-  const topSymbols = Object.entries(stats)
-    .sort((a, b) => (b[1].buy + b[1].sell) - (a[1].buy + a[1].sell))
-    .slice(0, 8)
-    .map(([s]) => s);
+  const displayed = (filter === 'cex'     ? moves.filter(m => m.exchange !== 'On-Chain BTC')
+                   : filter === 'onchain' ? moves.filter(m => m.exchange === 'On-Chain BTC')
+                   : moves);
 
-  let displayed = tradesRef.current;
-  if (filter === 'large') displayed = displayed.filter(t => t.usd >= 100_000);
-  if (filter === 'whale') displayed = displayed.filter(t => t.usd >= 1_000_000);
-  if (symFilter !== 'ALL') displayed = displayed.filter(t => t.symbol === symFilter);
-  displayed = displayed.slice(0, 60);
-
-  const buyVol  = displayed.reduce((s, t) => t.type === 'buy'  ? s + t.usd : s, 0);
-  const sellVol = displayed.reduce((s, t) => t.type === 'sell' ? s + t.usd : s, 0);
+  const buyVol  = moves.filter(m => m.type === 'buy').reduce((s, m) => s + m.usd, 0);
+  const sellVol = moves.filter(m => m.type === 'sell').reduce((s, m) => s + m.usd, 0);
   const totalVol = buyVol + sellVol;
-  const buyPct = totalVol > 0 ? Math.round((buyVol / totalVol) * 100) : 50;
+  const buyPct  = totalVol > 0 ? Math.round((buyVol / totalVol) * 100) : 50;
 
   return (
     <div className="bg-white/2 border border-white/8 rounded-2xl overflow-hidden flex flex-col">
@@ -257,9 +346,9 @@ export default function WhaleTracker() {
       <div className="px-4 py-3 border-b border-white/5 flex-shrink-0">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${connCount > 0 ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'}`} />
-            <span className="text-sm font-semibold text-white">Crypto Network Activity</span>
-            <span className="text-xs text-slate-500">{connCount}/{EXCHANGES.length} feeds</span>
+            <div className={`w-2 h-2 rounded-full ${connCEX + connOnChain > 0 ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'}`} />
+            <span className="text-sm font-semibold text-white">Whale Activity</span>
+            <span className="text-xs text-slate-500">$1M+ moves</span>
           </div>
           <div className="text-right">
             <div className="text-[10px] text-slate-600">Session vol</div>
@@ -267,14 +356,20 @@ export default function WhaleTracker() {
           </div>
         </div>
 
-        {/* Exchange status */}
-        <div className="flex items-center gap-2 flex-wrap">
-          {EXCHANGES.map(e => (
-            <div key={e.name} className="flex items-center gap-1 text-xs">
-              <span className={`w-1.5 h-1.5 rounded-full ${connected[e.name] ? 'bg-emerald-400 animate-pulse' : 'bg-red-500/60'}`} />
-              <span className={EXCHANGE_COLORS[e.name] ?? 'text-slate-400'}>{e.name}</span>
-            </div>
-          ))}
+        {/* Connection status */}
+        <div className="flex items-center gap-3 flex-wrap text-[10px]">
+          <div className="flex items-center gap-1">
+            <span className={`w-1.5 h-1.5 rounded-full ${connCEX > 0 ? 'bg-emerald-400 animate-pulse' : 'bg-red-500/60'}`} />
+            <span className="text-slate-400">CEX {connCEX}/{EXCHANGES.length}</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className={`w-1.5 h-1.5 rounded-full ${connected['On-Chain BTC'] ? 'bg-orange-400 animate-pulse' : 'bg-slate-600'}`} />
+            <span className="text-orange-300/70">BTC On-Chain</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className={`w-1.5 h-1.5 rounded-full ${connected['Mempool'] ? 'bg-orange-400 animate-pulse' : 'bg-slate-600'}`} />
+            <span className="text-orange-300/70">Mempool</span>
+          </div>
         </div>
       </div>
 
@@ -282,84 +377,71 @@ export default function WhaleTracker() {
       {totalVol > 0 && (
         <div className="px-4 py-2 border-b border-white/5 flex-shrink-0">
           <div className="flex justify-between text-xs mb-1">
-            <span className="text-emerald-400 font-medium">Buy {buyPct}%</span>
-            <span className={buyPct > 55 ? 'text-emerald-400' : buyPct < 45 ? 'text-red-400' : 'text-slate-400'}>
-              {buyPct > 55 ? '↑ Buying pressure' : buyPct < 45 ? '↓ Selling pressure' : '→ Balanced'}
-            </span>
-            <span className="text-red-400 font-medium">Sell {100 - buyPct}%</span>
+            <span className="text-emerald-400 font-mono">{buyPct}% buy {fmtUSD(buyVol)}</span>
+            <span className="text-red-400 font-mono">{fmtUSD(sellVol)} sell {100-buyPct}%</span>
           </div>
           <div className="flex h-1.5 rounded-full overflow-hidden">
-            <div className="bg-emerald-500 transition-all duration-500" style={{ width: `${buyPct}%` }} />
-            <div className="bg-red-500 transition-all duration-500"     style={{ width: `${100 - buyPct}%` }} />
+            <div className="bg-emerald-500 transition-all duration-1000" style={{ width: `${buyPct}%` }} />
+            <div className="bg-red-500 transition-all duration-1000"     style={{ width: `${100 - buyPct}%` }} />
           </div>
         </div>
       )}
 
-      {/* Filters */}
-      <div className="px-4 py-2 border-b border-white/5 flex-shrink-0 space-y-2">
-        <div className="flex gap-1">
-          {(['all', 'large', 'whale'] as const).map(f => (
-            <button key={f} onClick={() => setFilter(f)}
-              className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-all cursor-pointer ${filter === f ? 'bg-white/10 border-white/15 text-white' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
-              {f === 'all' ? 'All $10K+' : f === 'large' ? '🦈 $100K+' : '🐋 $1M+'}
-            </button>
-          ))}
-        </div>
-        {topSymbols.length > 0 && (
-          <div className="flex gap-1 flex-wrap">
-            <button onClick={() => setSymFilter('ALL')}
-              className={`px-2 py-0.5 rounded text-xs border transition-all cursor-pointer ${symFilter === 'ALL' ? 'bg-white/10 border-white/15 text-white' : 'border-transparent text-slate-600 hover:text-slate-400'}`}>
-              ALL
-            </button>
-            {topSymbols.map(s => (
-              <button key={s} onClick={() => setSymFilter(symFilter === s ? 'ALL' : s)}
-                className={`px-2 py-0.5 rounded text-xs border font-mono transition-all cursor-pointer ${symFilter === s ? 'bg-white/10 border-white/15 text-white' : 'border-transparent text-slate-600 hover:text-slate-400'}`}>
-                {s}
-              </button>
-            ))}
-          </div>
-        )}
+      {/* Filter tabs */}
+      <div className="px-4 py-2 border-b border-white/5 flex gap-1 flex-shrink-0">
+        {(['all','cex','onchain'] as const).map(f => (
+          <button key={f} onClick={() => setFilter(f)}
+            className={`px-2.5 py-1 rounded-lg text-xs border transition-all cursor-pointer ${filter === f ? 'bg-white/10 border-white/15 text-white' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
+            {f === 'all' ? 'All' : f === 'cex' ? '📊 Exchange' : '⛓️ On-Chain'}
+          </button>
+        ))}
       </div>
 
-      {/* Live feed */}
+      {/* Feed */}
       <div className="flex-1 overflow-y-auto max-h-80 divide-y divide-white/3">
         {displayed.length === 0 ? (
-          <div className="py-8 text-center text-slate-500 text-xs">
-            {connCount > 0
-              ? `Streaming crypto trades ($10K+) from ${connCount} exchanges…`
-              : 'Connecting to crypto exchanges…'}
+          <div className="py-8 text-center text-slate-600 text-xs">
+            {connCEX + connOnChain > 0
+              ? 'Watching for whale moves ($1M+)… large trades appear here in real time'
+              : 'Connecting to exchange feeds and blockchain…'}
           </div>
-        ) : displayed.map(t => (
-          <div key={t.id} className={`px-3 py-2 hover:bg-white/2 transition-colors flex items-center gap-2 ${
-            t.tag === 'mega' ? 'bg-yellow-500/5 border-l-2 border-yellow-500/50' :
-            t.tag === 'whale' ? 'bg-purple-500/5 border-l-2 border-purple-500/40' :
-            t.tag === 'large' ? 'border-l-2 border-blue-500/30' :
-            t.type === 'buy' ? 'border-l border-emerald-500/20' : 'border-l border-red-500/20'
+        ) : displayed.map(m => (
+          <div key={m.id} className={`px-3 py-2.5 hover:bg-white/2 transition-colors ${
+            m.tag === 'mega'  ? 'bg-yellow-500/5 border-l-2 border-yellow-500/60' :
+            m.tag === 'whale' ? 'bg-purple-500/5 border-l-2 border-purple-500/50' :
+            'border-l-2 border-blue-500/30'
           }`}>
-            {/* Direction */}
-            <span className={`text-xs font-bold w-3 flex-shrink-0 ${t.type === 'buy' ? 'text-emerald-400' : 'text-red-400'}`}>
-              {t.type === 'buy' ? '▲' : '▼'}
-            </span>
-            {/* Symbol */}
-            <span className="font-mono text-xs font-bold text-white w-10 flex-shrink-0">{t.symbol}</span>
-            {/* USD value */}
-            <span className={`font-mono text-xs font-bold flex-shrink-0 ${
-              t.tag === 'mega' ? 'text-yellow-300' :
-              t.tag === 'whale' ? 'text-purple-300' :
-              t.tag === 'large' ? 'text-blue-300' :
-              t.type === 'buy' ? 'text-emerald-400' : 'text-red-400'
-            }`}>{t.usdDisplay}</span>
-            {/* Tag label */}
-            {tagLabel(t.tag) && (
-              <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold border flex-shrink-0 ${tagStyle(t.tag)}`}>
-                {tagLabel(t.tag)}
-              </span>
-            )}
-            {/* Exchange */}
-            <span className={`text-[10px] flex-shrink-0 ${EXCHANGE_COLORS[t.exchange] ?? 'text-slate-500'}`}>{t.exchange}</span>
-            <div className="flex-1" />
-            {/* Time */}
-            <span className="text-[10px] text-slate-600 flex-shrink-0">{t.timeAgo}</span>
+            <div className="flex items-center gap-2 mb-1">
+              {/* Direction / type */}
+              {m.type === 'transfer' ? (
+                <span className="text-orange-300 text-xs font-bold w-4">⇄</span>
+              ) : (
+                <span className={`text-xs font-bold w-4 ${m.type === 'buy' ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {m.type === 'buy' ? '▲' : '▼'}
+                </span>
+              )}
+              <span className="font-mono text-xs font-bold text-white w-10">{m.symbol}</span>
+              <span className={`font-mono text-sm font-bold ${
+                m.tag === 'mega' ? 'text-yellow-300' : m.tag === 'whale' ? 'text-purple-300' : 'text-blue-300'
+              }`}>{m.usdDisplay}</span>
+              <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${tagStyle(m.tag)}`}>{tagLabel(m.tag)}</span>
+              <div className="flex-1" />
+              <span className="text-[10px] text-slate-600">{m.timeAgo}</span>
+            </div>
+            <div className="flex items-center gap-2 text-[10px] text-slate-500 pl-6">
+              <span className={EX_COLORS[m.exchange] ?? 'text-slate-400'}>{m.exchange}</span>
+              <span>·</span>
+              <span>{m.qty}</span>
+              {m.wallet && (
+                <>
+                  <span>·</span>
+                  <a href={`https://www.blockchain.com/btc/tx/${m.txHash}`} target="_blank" rel="noopener noreferrer"
+                     className="font-mono text-orange-300/60 hover:text-orange-300 transition-colors">
+                    {m.wallet}
+                  </a>
+                </>
+              )}
+            </div>
           </div>
         ))}
       </div>
