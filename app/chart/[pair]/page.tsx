@@ -14,12 +14,13 @@ import { calculateLevels, type TradeLevels } from '@/lib/levelCalculator';
 import { getBestStrategy, type Strategy } from '@/lib/strategyMatcher';
 import { runBacktest, STRATEGY_KEYS, type StrategyKey, type BacktestResult, type BacktestTrade } from '@/lib/backtester';
 import type { ChartStyle } from '@/components/chart/LiveChart';
+import ChartTradePanel from '@/components/demo/ChartTradePanel';
 
 const LiveChart = dynamic(() => import('@/components/chart/LiveChart'), { ssr: false });
 
 const TFS = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '12h', '1D', '1W', '1M'] as const;
 type TF = typeof TFS[number];
-type Tab = 'signal' | 'strategy';
+type Tab = 'signal' | 'strategy' | 'trade';
 
 const CHART_STYLES: { key: ChartStyle; label: string; icon: string }[] = [
   { key: 'candles',     label: 'Candles',     icon: '▤' },
@@ -58,6 +59,7 @@ export default function ChartPage({ params }: { params: Promise<{ pair: string }
   // Auto-refresh countdown
   const [countdown, setCountdown] = useState(300);
   const [dataSource, setDataSource] = useState('');
+  const [livePrice, setLivePrice] = useState<number | null>(null);
 
   // Fetch OHLCV — crypto fetches Binance directly from browser to avoid Vercel server IP blocks
   const fetchData = useCallback(async () => {
@@ -106,6 +108,7 @@ export default function ChartPage({ params }: { params: Promise<{ pair: string }
 
       if (Array.isArray(data) && data.length >= 30) {
         setOhlcv(data);
+        setLivePrice(data[data.length - 1].close);
         const sig = calculateSignal(data);
         setSignal(sig);
         const { best } = getBestStrategy(sig);
@@ -306,15 +309,24 @@ export default function ChartPage({ params }: { params: Promise<{ pair: string }
           <div className="w-[280px] flex-shrink-0 border-l border-white/5 flex flex-col bg-slate-900/40">
             {/* Tabs */}
             <div className="flex border-b border-white/5 flex-shrink-0">
-              {([['signal', 'Signal'], ['strategy', 'Strategies']] as [Tab, string][]).map(([t, label]) => (
+              {([['signal', 'Signal'], ['strategy', 'Strategies'], ['trade', 'Trade']] as [Tab, string][]).map(([t, label]) => (
                 <button key={t} onClick={() => setTab(t)}
-                  className={`flex-1 py-3 text-sm font-medium cursor-pointer transition-all duration-150 border-b-2 ${
-                    tab === t ? 'text-white border-emerald-500' : 'text-slate-500 border-transparent hover:text-slate-300'
+                  className={`flex-1 py-3 text-xs font-medium cursor-pointer transition-all duration-150 border-b-2 ${
+                    tab === t
+                      ? t === 'trade'
+                        ? 'text-violet-400 border-violet-500'
+                        : 'text-white border-emerald-500'
+                      : 'text-slate-500 border-transparent hover:text-slate-300'
                   }`}>
                   {label}
                   {t === 'strategy' && backtestResults && (
-                    <span className="ml-1.5 px-1.5 py-0.5 rounded text-xs bg-amber-500/15 text-amber-400 border border-amber-500/20">
+                    <span className="ml-1 px-1 py-0.5 rounded text-xs bg-amber-500/15 text-amber-400 border border-amber-500/20">
                       {backtestResults[selectedStrategy]?.winRate ?? 0}%
+                    </span>
+                  )}
+                  {t === 'trade' && (
+                    <span className="ml-1 px-1 py-0.5 rounded text-xs bg-violet-500/15 text-violet-400 border border-violet-500/20">
+                      Demo
                     </span>
                   )}
                 </button>
@@ -343,7 +355,7 @@ export default function ChartPage({ params }: { params: Promise<{ pair: string }
                     </div>
                   </div>
                 )
-              ) : (
+              ) : tab === 'strategy' ? (
                 <StrategyPanel
                   results={backtestResults}
                   selectedStrategy={selectedStrategy}
@@ -351,6 +363,13 @@ export default function ChartPage({ params }: { params: Promise<{ pair: string }
                   signal={signal}
                   loading={backtestLoading || ohlcv.length < 40}
                   candles={ohlcv.length}
+                />
+              ) : (
+                <ChartTradePanel
+                  pair={pair}
+                  signal={signal}
+                  levels={tradeType === 'auto' ? levels : forcedLevels}
+                  livePrice={livePrice}
                 />
               )}
             </div>
