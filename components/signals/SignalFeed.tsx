@@ -31,12 +31,35 @@ export default function SignalFeed() {
     setRefreshing(true);
     setLoadedCount(0);
     let done = 0;
+
     await Promise.allSettled(
       PAIRS.map(async (pair) => {
         try {
-          const res = await fetch(`/api/ohlcv/${pair.id}?tf=1h`);
-          if (!res.ok) throw new Error('fetch failed');
-          const ohlcv = await res.json();
+          let ohlcv: { time: number; open: number; high: number; low: number; close: number; volume: number }[] = [];
+
+          if (pair.market === 'crypto' && pair.binanceSymbol) {
+            // Fetch directly from Binance browser-side — avoids Vercel server IP blocks
+            const res = await fetch(
+              `https://api.binance.com/api/v3/klines?symbol=${pair.binanceSymbol.toUpperCase()}&interval=1h&limit=200`
+            );
+            if (!res.ok) throw new Error(`Binance ${res.status}`);
+            const raw: string[][] = await res.json();
+            ohlcv = raw
+              .map(k => ({
+                time:   Math.floor(parseInt(k[0]) / 1000),
+                open:   parseFloat(k[1]),
+                high:   parseFloat(k[2]),
+                low:    parseFloat(k[3]),
+                close:  parseFloat(k[4]),
+                volume: parseFloat(k[5]),
+              }))
+              .filter(c => c.close > 0 && c.time > 0);
+          } else {
+            const res = await fetch(`/api/ohlcv/${pair.id}?tf=1h`);
+            if (!res.ok) throw new Error('fetch failed');
+            ohlcv = await res.json();
+          }
+
           if (!Array.isArray(ohlcv) || ohlcv.length < 30) throw new Error('no data');
           const signal = calculateSignal(ohlcv);
           const levels = calculateLevels(ohlcv, signal.signal, pair);

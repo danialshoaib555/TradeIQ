@@ -59,20 +59,60 @@ export default function ChartPage({ params }: { params: Promise<{ pair: string }
   const [countdown, setCountdown] = useState(300);
   const [dataSource, setDataSource] = useState('');
 
-  // Fetch OHLCV
+  // Fetch OHLCV — crypto fetches Binance directly from browser to avoid Vercel server IP blocks
   const fetchData = useCallback(async () => {
     if (!pair) return;
     setOhlcv([]);
-    const res = await fetch(`/api/ohlcv/${pairId}?tf=${tf}`).catch(() => null);
-    if (!res?.ok) return;
-    setDataSource(res.headers.get('X-Data-Source') ?? pair.exchange);
-    const data = await res.json();
-    if (Array.isArray(data) && data.length >= 30) {
-      setOhlcv(data);
-      const sig = calculateSignal(data);
-      setSignal(sig);
-      const { best } = getBestStrategy(sig);
-      setStrategy(best);
+
+    const TF_BINANCE: Record<string, string> = {
+      '1m':'1m','3m':'3m','5m':'5m','15m':'15m','30m':'30m',
+      '1h':'1h','2h':'2h','4h':'4h','6h':'6h','12h':'12h',
+      '1D':'1d','1W':'1w','1M':'1M',
+    };
+    const TF_LIMIT: Record<string, number> = {
+      '1m':300,'3m':300,'5m':300,'15m':400,'30m':500,
+      '1h':500,'2h':500,'4h':500,'6h':500,'12h':500,
+      '1D':365,'1W':200,'1M':60,
+    };
+
+    try {
+      let data: OHLCV[] = [];
+
+      if (pair.market === 'crypto' && pair.binanceSymbol) {
+        const interval = TF_BINANCE[tf] ?? '1h';
+        const limit = TF_LIMIT[tf] ?? 500;
+        const res = await fetch(
+          `https://api.binance.com/api/v3/klines?symbol=${pair.binanceSymbol.toUpperCase()}&interval=${interval}&limit=${limit}`
+        );
+        if (!res.ok) throw new Error(`Binance ${res.status}`);
+        const raw: string[][] = await res.json();
+        data = raw
+          .map(k => ({
+            time:   Math.floor(parseInt(k[0]) / 1000),
+            open:   parseFloat(k[1]),
+            high:   parseFloat(k[2]),
+            low:    parseFloat(k[3]),
+            close:  parseFloat(k[4]),
+            volume: parseFloat(k[5]),
+          }))
+          .filter(c => c.close > 0 && c.time > 0);
+        setDataSource(`Binance (${interval})`);
+      } else {
+        const res = await fetch(`/api/ohlcv/${pairId}?tf=${tf}`);
+        if (!res.ok) throw new Error('API error');
+        setDataSource(res.headers.get('X-Data-Source') ?? pair.exchange);
+        data = await res.json();
+      }
+
+      if (Array.isArray(data) && data.length >= 30) {
+        setOhlcv(data);
+        const sig = calculateSignal(data);
+        setSignal(sig);
+        const { best } = getBestStrategy(sig);
+        setStrategy(best);
+      }
+    } catch (e) {
+      console.error('fetchData error:', e);
     }
   }, [pair, pairId, tf]);
 
