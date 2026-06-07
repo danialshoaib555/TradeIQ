@@ -11,15 +11,15 @@ interface Props {
   levels: TradeLevels | null;
   forcedLevels: TradeLevels | null;
   strategy: Strategy | null;
-  tradeType: 'auto' | 'long' | 'short';
-  onTradeTypeChange: (t: 'auto' | 'long' | 'short') => void;
+  tradeType: 'auto' | 'long' | 'short' | 'spot';
+  onTradeTypeChange: (t: 'auto' | 'long' | 'short' | 'spot') => void;
   // Backtest data for selected strategy
   selectedStrategy?: StrategyKey;
   backtestResult?: BacktestResult | null;
 }
 
 export default function SignalOverlay({ signal, levels, forcedLevels, strategy, tradeType, onTradeTypeChange, selectedStrategy, backtestResult }: Props) {
-  const effectiveDir = tradeType === 'long' ? 'BUY' : tradeType === 'short' ? 'SELL' : signal.signal;
+  const effectiveDir = tradeType === 'long' ? 'BUY' : tradeType === 'short' ? 'SELL' : tradeType === 'spot' ? signal.signal : signal.signal;
   const activeLevels = (tradeType !== 'auto') ? forcedLevels : levels;
 
   const sc = {
@@ -36,10 +36,11 @@ export default function SignalOverlay({ signal, levels, forcedLevels, strategy, 
     { label: 'BB Level',   met: signal.conditions.bb },
   ];
 
-  const tradeButtons: { key: 'auto' | 'long' | 'short'; label: string; active: string; inactive: string }[] = [
-    { key: 'auto',  label: 'Auto',    active: 'bg-slate-500/20 text-slate-300 border-slate-500/40', inactive: 'bg-white/5 text-slate-500 border-white/8' },
-    { key: 'long',  label: '↑ Long',  active: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40', inactive: 'bg-white/5 text-slate-500 border-white/8 hover:text-emerald-400' },
-    { key: 'short', label: '↓ Short', active: 'bg-red-500/20 text-red-400 border-red-500/40', inactive: 'bg-white/5 text-slate-500 border-white/8 hover:text-red-400' },
+  const tradeButtons: { key: 'auto' | 'long' | 'short' | 'spot'; label: string; active: string; inactive: string }[] = [
+    { key: 'auto',  label: 'Auto',     active: 'bg-slate-500/20 text-slate-300 border-slate-500/40',     inactive: 'bg-white/5 text-slate-500 border-white/8' },
+    { key: 'spot',  label: '◈ Spot',   active: 'bg-blue-500/20 text-blue-400 border-blue-500/40',         inactive: 'bg-white/5 text-slate-500 border-white/8 hover:text-blue-400' },
+    { key: 'long',  label: '↑ Long',   active: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40', inactive: 'bg-white/5 text-slate-500 border-white/8 hover:text-emerald-400' },
+    { key: 'short', label: '↓ Short',  active: 'bg-red-500/20 text-red-400 border-red-500/40',             inactive: 'bg-white/5 text-slate-500 border-white/8 hover:text-red-400' },
   ];
 
   const stratMeta = selectedStrategy ? STRATEGY_META[selectedStrategy] : null;

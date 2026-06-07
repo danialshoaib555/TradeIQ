@@ -11,7 +11,7 @@ interface Props {
   pair: Pair;
   levels: TradeLevels | null;
   signal: SignalResult | null;
-  tradeType?: 'auto' | 'long' | 'short';
+  tradeType?: 'auto' | 'long' | 'short' | 'spot';
   selectedStrategy?: StrategyKey;
   backtestTrades?: BacktestTrade[];
   timeframe?: string;
@@ -36,7 +36,7 @@ function bbCalc(values: number[], period = 20, mult = 2) {
   const upper: number[] = [], middle: number[] = [], lower: number[] = [];
   for (let i = 0; i < values.length; i++) {
     if (i < period - 1) { upper.push(NaN); middle.push(NaN); lower.push(NaN); continue; }
-    const sl = values.slice(i - period + 1, i + 1);
+    const sl  = values.slice(i - period + 1, i + 1);
     const avg = sl.reduce((a, b) => a + b, 0) / period;
     const std = Math.sqrt(sl.reduce((a, b) => a + (b - avg) ** 2, 0) / period);
     middle.push(avg); upper.push(avg + mult * std); lower.push(avg - mult * std);
@@ -44,7 +44,6 @@ function bbCalc(values: number[], period = 20, mult = 2) {
   return { upper, middle, lower };
 }
 
-// Convert OHLCV to Heikin-Ashi
 function toHeikinAshi(bars: OHLCVBar[]): OHLCVBar[] {
   const ha: OHLCVBar[] = [];
   for (let i = 0; i < bars.length; i++) {
@@ -58,7 +57,6 @@ function toHeikinAshi(bars: OHLCVBar[]): OHLCVBar[] {
   return ha;
 }
 
-// Strategy → overlays
 const STRATEGY_OVERLAYS: Record<StrategyKey, { ema: boolean; bb: boolean }> = {
   ema_cross:      { ema: true,  bb: false },
   trend_pullback: { ema: true,  bb: false },
@@ -88,15 +86,22 @@ const STRATEGY_OVERLAYS: Record<StrategyKey, { ema: boolean; bb: boolean }> = {
 };
 
 const TF_TO_BINANCE: Record<string, string> = {
-  '1m': '1m', '3m': '3m', '5m': '5m', '15m': '15m', '30m': '30m',
-  '1h': '1h', '2h': '2h', '4h': '4h', '6h': '6h', '12h': '12h',
-  '1D': '1d', '1W': '1w', '1M': '1M',
+  '1m':'1m','3m':'3m','5m':'5m','15m':'15m','30m':'30m',
+  '1h':'1h','2h':'2h','4h':'4h','6h':'6h','12h':'12h',
+  '1D':'1d','1W':'1w','1M':'1M',
+};
+
+// How many candles to keep visible at right-side of screen (TradingView-like default view)
+const TF_VISIBLE_BARS: Record<string, number> = {
+  '1m':120,'3m':120,'5m':100,'15m':80,'30m':60,
+  '1h':60,'2h':60,'4h':50,'6h':40,'12h':30,
+  '1D':60,'1W':52,'1M':24,
 };
 
 export default function LiveChart({ pair, levels, signal, tradeType = 'auto', selectedStrategy, backtestTrades, timeframe = '1h', chartStyle = 'candles' }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [ohlcv, setOhlcv] = useState<OHLCVBar[]>([]);
-  const [ready, setReady] = useState(false);
+  const [ohlcv, setOhlcv]         = useState<OHLCVBar[]>([]);
+  const [ready, setReady]         = useState(false);
   const [livePrice, setLivePrice] = useState<number | null>(null);
   const [priceChange, setPriceChange] = useState<number>(0);
 
@@ -114,17 +119,21 @@ export default function LiveChart({ pair, levels, signal, tradeType = 'auto', se
   useEffect(() => {
     if (!ready || !containerRef.current || ohlcv.length === 0) return;
 
-    const overlays = selectedStrategy ? STRATEGY_OVERLAYS[selectedStrategy] : { ema: true, bb: false };
+    const overlays   = selectedStrategy ? STRATEGY_OVERLAYS[selectedStrategy] : { ema: true, bb: false };
+    const isOHLC     = chartStyle === 'candles' || chartStyle === 'bars' || chartStyle === 'heikin-ashi';
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let chart: any = null;
+    let chart: any       = null;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let mainSeries: any = null;
+    let mainSeries: any  = null;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let markersPlugin: any = null;
     let ws: WebSocket | null = null;
     let pollTimer: ReturnType<typeof setInterval> | null = null;
     let destroyed = false;
+
+    // Keep mutable copy of latest bars for HA updates
+    const liveBars = [...ohlcv].sort((a, b) => a.time - b.time);
 
     const init = async () => {
       try {
@@ -139,17 +148,26 @@ export default function LiveChart({ pair, levels, signal, tradeType = 'auto', se
             horzLines: { color: 'rgba(255,255,255,0.04)' },
           },
           rightPriceScale: { borderColor: 'rgba(255,255,255,0.08)' },
-          timeScale: { borderColor: 'rgba(255,255,255,0.08)', timeVisible: true, secondsVisible: false },
+          timeScale: {
+            borderColor: 'rgba(255,255,255,0.08)',
+            timeVisible: true,
+            secondsVisible: false,
+            rightOffset: 5,          // breathing room for the live candle
+            fixLeftEdge: false,
+            lockVisibleTimeRangeOnResize: true,
+          },
           crosshair: { mode: 1 },
           width:  containerRef.current.clientWidth,
           height: containerRef.current.clientHeight || 420,
+          handleScroll: true,
+          handleScale: true,
         });
 
-        const sorted = [...ohlcv].sort((a, b) => a.time - b.time);
+        const sorted = liveBars;
         const closes = sorted.map(c => c.close);
         const times  = sorted.map(c => c.time);
 
-        // ── Main series based on chart style ─────────────────────────────
+        // ── Main series ──────────────────────────────────────────────────
         if (chartStyle === 'line') {
           mainSeries = chart.addSeries(LWC.LineSeries, {
             color: '#22C55E', lineWidth: 2, priceLineVisible: true, lastValueVisible: true,
@@ -158,15 +176,14 @@ export default function LiveChart({ pair, levels, signal, tradeType = 'auto', se
 
         } else if (chartStyle === 'area') {
           mainSeries = chart.addSeries(LWC.AreaSeries, {
-            lineColor: '#22C55E', topColor: 'rgba(34,197,94,0.3)', bottomColor: 'rgba(34,197,94,0.02)',
+            lineColor: '#22C55E', topColor: 'rgba(34,197,94,0.25)', bottomColor: 'rgba(34,197,94,0.02)',
             lineWidth: 2, priceLineVisible: true, lastValueVisible: true,
           });
           mainSeries.setData(sorted.map(c => ({ time: c.time, value: c.close })));
 
         } else if (chartStyle === 'bars') {
           mainSeries = chart.addSeries(LWC.BarSeries, {
-            upColor: '#22C55E', downColor: '#EF4444',
-            openVisible: true, thinBars: false,
+            upColor: '#22C55E', downColor: '#EF4444', openVisible: true, thinBars: false,
           });
           mainSeries.setData(sorted);
 
@@ -179,7 +196,6 @@ export default function LiveChart({ pair, levels, signal, tradeType = 'auto', se
           mainSeries.setData(toHeikinAshi(sorted));
 
         } else {
-          // Default: candlestick
           mainSeries = chart.addSeries(LWC.CandlestickSeries, {
             upColor: '#22C55E', downColor: '#EF4444',
             borderUpColor: '#22C55E', borderDownColor: '#EF4444',
@@ -202,16 +218,15 @@ export default function LiveChart({ pair, levels, signal, tradeType = 'auto', se
         if (overlays.bb && LWC.LineSeries) {
           const bb = bbCalc(closes);
           const from = 19;
-          const slice = times.slice(from);
           const mkBB = (color: string, title: string) => chart.addSeries(LWC.LineSeries, {
             color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, lineStyle: 2, title,
           });
           const bbU = mkBB('rgba(168,85,247,0.7)', 'BB+');
           const bbM = mkBB('rgba(168,85,247,0.35)', 'BB');
           const bbL = mkBB('rgba(168,85,247,0.7)', 'BB-');
-          bbU.setData(slice.map((t, i) => ({ time: t, value: bb.upper[i + from] })));
-          bbM.setData(slice.map((t, i) => ({ time: t, value: bb.middle[i + from] })));
-          bbL.setData(slice.map((t, i) => ({ time: t, value: bb.lower[i + from] })));
+          bbU.setData(times.slice(from).map((t, i) => ({ time: t, value: bb.upper[i + from] })));
+          bbM.setData(times.slice(from).map((t, i) => ({ time: t, value: bb.middle[i + from] })));
+          bbL.setData(times.slice(from).map((t, i) => ({ time: t, value: bb.lower[i + from] })));
         }
 
         // ── TP/SL price lines ─────────────────────────────────────────────
@@ -231,92 +246,125 @@ export default function LiveChart({ pair, levels, signal, tradeType = 'auto', se
           const allMarkers: unknown[] = [];
           if (backtestTrades && backtestTrades.length > 0) {
             for (const t of backtestTrades.slice(-20)) {
-              allMarkers.push({
-                time: t.entryTime,
-                position: t.direction === 'BUY' ? 'belowBar' : 'aboveBar',
-                color: t.direction === 'BUY' ? '#60A5FA' : '#F87171',
-                shape: t.direction === 'BUY' ? 'arrowUp' : 'arrowDown',
-                text: t.direction === 'BUY' ? 'B' : 'S', size: 1,
-              });
-              if (t.outcome !== 'open') {
-                allMarkers.push({
-                  time: t.exitTime,
-                  position: t.direction === 'BUY' ? 'aboveBar' : 'belowBar',
-                  color: t.outcome === 'win' ? '#22C55E' : '#EF4444',
-                  shape: 'circle', text: t.outcome === 'win' ? '✓' : '✗', size: 0.5,
-                });
-              }
+              allMarkers.push({ time: t.entryTime, position: t.direction === 'BUY' ? 'belowBar' : 'aboveBar', color: t.direction === 'BUY' ? '#60A5FA' : '#F87171', shape: t.direction === 'BUY' ? 'arrowUp' : 'arrowDown', text: t.direction === 'BUY' ? 'B' : 'S', size: 1 });
+              if (t.outcome !== 'open') allMarkers.push({ time: t.exitTime, position: t.direction === 'BUY' ? 'aboveBar' : 'belowBar', color: t.outcome === 'win' ? '#22C55E' : '#EF4444', shape: 'circle', text: t.outcome === 'win' ? '✓' : '✗', size: 0.5 });
             }
           }
-          const markerDir = tradeType !== 'auto' ? (tradeType === 'long' ? 'BUY' : 'SELL') : signal?.signal;
+          const markerDir = tradeType !== 'auto' ? (tradeType === 'long' ? 'BUY' : tradeType === 'short' ? 'SELL' : undefined) : signal?.signal;
           const last = sorted.at(-1);
           if (last && markerDir && markerDir !== 'WAIT') {
-            allMarkers.push({
-              time: last.time,
-              position: markerDir === 'BUY' ? 'belowBar' : 'aboveBar',
-              color: markerDir === 'BUY' ? '#22C55E' : '#EF4444',
-              shape: markerDir === 'BUY' ? 'arrowUp' : 'arrowDown',
-              text: markerDir === 'BUY' ? (tradeType === 'long' ? 'LONG' : 'BUY') : (tradeType === 'short' ? 'SHORT' : 'SELL'),
-              size: 2,
-            });
+            allMarkers.push({ time: last.time, position: markerDir === 'BUY' ? 'belowBar' : 'aboveBar', color: markerDir === 'BUY' ? '#22C55E' : '#EF4444', shape: markerDir === 'BUY' ? 'arrowUp' : 'arrowDown', text: markerDir === 'BUY' ? (tradeType === 'long' ? 'LONG' : 'BUY') : (tradeType === 'short' ? 'SHORT' : 'SELL'), size: 2 });
           }
-          allMarkers.sort((a: unknown, b: unknown) => ((a as { time: number }).time - (b as { time: number }).time));
+          allMarkers.sort((a: unknown, b: unknown) => ((a as {time:number}).time - (b as {time:number}).time));
           if (allMarkers.length > 0) markersPlugin = LWC.createSeriesMarkers(mainSeries, allMarkers);
         }
 
-        chart.timeScale().fitContent();
+        // ── Zoom to last N bars (TradingView default behavior) ────────────
+        const visibleBars = TF_VISIBLE_BARS[timeframe] ?? 60;
+        if (sorted.length > visibleBars) {
+          // Show the last N candles + rightOffset breathing room
+          const from = sorted[sorted.length - visibleBars].time;
+          const to   = sorted[sorted.length - 1].time;
+          chart.timeScale().setVisibleRange({ from, to });
+        } else {
+          chart.timeScale().fitContent();
+        }
+        // Always scroll to show the latest candle at the right
+        chart.timeScale().scrollToRealTime();
 
-        // ── Real-time updates ─────────────────────────────────────────────
-        const updatePrice = (close: number) => {
-          const prev = sorted.at(-2)?.close ?? close;
+        // ── Live price update helper ───────────────────────────────────────
+        const updatePrice = (close: number, prevClose: number) => {
           setLivePrice(close);
-          setPriceChange(((close - prev) / prev) * 100);
+          setPriceChange(prevClose > 0 ? ((close - prevClose) / prevClose) * 100 : 0);
         };
 
-        const isOHLCStyle = chartStyle === 'candles' || chartStyle === 'bars' || chartStyle === 'heikin-ashi';
-
+        // ── Binance kline WebSocket for crypto ────────────────────────────
         if (pair.binanceSymbol && pair.market === 'crypto') {
           const wsInterval = TF_TO_BINANCE[timeframe] ?? '1h';
           try {
             ws = new WebSocket(`wss://stream.binance.com:9443/ws/${pair.binanceSymbol.toLowerCase()}@kline_${wsInterval}`);
+
             ws.onmessage = (evt) => {
               if (destroyed || !mainSeries) return;
-              const k = JSON.parse(evt.data).k;
-              const candle = { time: Math.floor(k.t / 1000), open: parseFloat(k.o), high: parseFloat(k.h), low: parseFloat(k.l), close: parseFloat(k.c) };
-              if (isOHLCStyle) {
+              const { k } = JSON.parse(evt.data) as { k: { t: number; o: string; h: string; l: string; c: string; x: boolean } };
+
+              // Binance kline open-time is in ms → convert to seconds
+              const candleTime = Math.floor(k.t / 1000);
+              const o = parseFloat(k.o), h = parseFloat(k.h), lo = parseFloat(k.l), c = parseFloat(k.c);
+
+              // Sanity check: ignore candles with obviously wrong timestamps
+              const nowSec = Math.floor(Date.now() / 1000);
+              if (candleTime > nowSec + 10 || candleTime < nowSec - 86400 * 30) return;
+
+              const lastBar   = liveBars.at(-1);
+              const prevClose = liveBars.at(-2)?.close ?? o;
+
+              if (lastBar && lastBar.time === candleTime) {
+                // Updating the current open candle — keep running H/L
+                lastBar.high  = Math.max(lastBar.high, h);
+                lastBar.low   = Math.min(lastBar.low, lo);
+                lastBar.close = c;
+              } else if (!lastBar || candleTime > lastBar.time) {
+                // Brand-new candle: close the previous one first by finalising its data,
+                // then add the new bar. No gap will appear because candleTime is exactly
+                // the next expected interval step.
+                liveBars.push({ time: candleTime, open: o, high: h, low: lo, close: c, volume: 0 });
+                if (liveBars.length > 600) liveBars.shift();
+              }
+
+              // Push update to chart
+              if (isOHLC) {
                 if (chartStyle === 'heikin-ashi') {
-                  const prev = sorted.at(-1);
+                  const prev = liveBars.length >= 2 ? liveBars[liveBars.length - 2] : null;
                   if (prev) {
                     const haOpen  = (prev.open + prev.close) / 2;
-                    const haClose = (candle.open + candle.high + candle.low + candle.close) / 4;
-                    mainSeries.update({ time: candle.time, open: haOpen, high: Math.max(candle.high, haOpen, haClose), low: Math.min(candle.low, haOpen, haClose), close: haClose });
+                    const haClose = (o + h + lo + c) / 4;
+                    mainSeries.update({
+                      time:  candleTime,
+                      open:  haOpen,
+                      high:  Math.max(h, haOpen, haClose),
+                      low:   Math.min(lo, haOpen, haClose),
+                      close: haClose,
+                    });
                   }
                 } else {
-                  mainSeries.update(candle);
+                  mainSeries.update({ time: candleTime, open: o, high: h, low: lo, close: c });
                 }
               } else {
-                mainSeries.update({ time: candle.time, value: candle.close });
+                mainSeries.update({ time: candleTime, value: c });
               }
-              updatePrice(candle.close);
+
+              updatePrice(c, prevClose);
+              chart?.timeScale().scrollToRealTime();
             };
+
             ws.onerror = () => { ws = null; startPolling(); };
+            ws.onclose = () => { if (!destroyed) { ws = null; startPolling(); } };
           } catch { startPolling(); }
+
         } else {
+          // Non-crypto: poll every 30s
           startPolling();
         }
 
         function startPolling() {
+          // Initial live price from last known bar
+          const last = liveBars.at(-1);
+          const prev = liveBars.at(-2);
+          if (last) updatePrice(last.close, prev?.close ?? last.close);
+
           pollTimer = setInterval(async () => {
             if (destroyed) return;
             try {
-              const res = await fetch(`/api/ohlcv/${pair.id}?tf=${timeframe}`);
+              const res  = await fetch(`/api/ohlcv/${pair.id}?tf=${timeframe}`);
               const data = await res.json();
-              if (Array.isArray(data) && data.length > 0) {
-                const last = data[data.length - 1];
-                if (isOHLCStyle) mainSeries?.update(last);
-                else mainSeries?.update({ time: last.time, value: last.close });
-                updatePrice(last.close);
-              }
+              if (!Array.isArray(data) || data.length === 0) return;
+              const last = data[data.length - 1];
+              const prev = data[data.length - 2];
+              if (isOHLC) mainSeries?.update(last);
+              else        mainSeries?.update({ time: last.time, value: last.close });
+              updatePrice(last.close, prev?.close ?? last.close);
+              chart?.timeScale().scrollToRealTime();
             } catch {}
           }, 30_000);
         }
@@ -328,6 +376,7 @@ export default function LiveChart({ pair, levels, signal, tradeType = 'auto', se
         });
         ro.observe(containerRef.current!);
         return () => ro.disconnect();
+
       } catch (e) {
         console.error('Chart init error:', e);
       }
@@ -386,7 +435,7 @@ export default function LiveChart({ pair, levels, signal, tradeType = 'auto', se
         </div>
       )}
       {ready && ohlcv.length === 0 && (
-        <div className="absolute inset-0 flex items-center justify-center text-slate-500 text-sm">No chart data for this pair</div>
+        <div className="absolute inset-0 flex items-center justify-center text-slate-500 text-sm">No chart data</div>
       )}
 
       {/* Legend */}

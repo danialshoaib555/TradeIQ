@@ -99,8 +99,9 @@ export function calculateSignal(ohlcv: OHLCV[]): SignalResult {
   const trending     = (adx?.adx ?? 0) > 25;
 
   // Core conditions (always scored)
-  const coreBuyConditions  = [rsi < 35, emaCrossedBullish || ema9AboveEma21, macdBullCross || macdBullish, nearLowerBB];
-  const coreSellConditions = [rsi > 65, emaCrossedBearish || ema9BelowEma21, macdBearCross || macdBearish, nearUpperBB];
+  // RSI thresholds: 45/55 instead of 35/65 for more crypto-friendly signals
+  const coreBuyConditions  = [rsi < 45, emaCrossedBullish || ema9AboveEma21, macdBullCross || macdBullish, nearLowerBB];
+  const coreSellConditions = [rsi > 55, emaCrossedBearish || ema9BelowEma21, macdBearCross || macdBearish, nearUpperBB];
 
   // Volume condition added only when volume data is available
   const buyConditions  = hasVolumeData ? [...coreBuyConditions,  volumeSpike] : coreBuyConditions;
@@ -116,7 +117,7 @@ export function calculateSignal(ohlcv: OHLCV[]): SignalResult {
   if (buyCount >= SAFETY_RULES.minConditionsRequired && buyCount > sellCount) {
     signal = 'BUY';
     confidence = Math.round((buyCount / buyConditions.length) * 100);
-    if (rsi < 35)          reasons.push(`RSI at ${rsi.toFixed(1)} — oversold, bounce likely`);
+    if (rsi < 45)          reasons.push(`RSI at ${rsi.toFixed(1)} — oversold, bounce likely`);
     if (emaCrossedBullish) reasons.push('EMA 9 crossed above EMA 21 — bullish momentum');
     if (macdBullCross)     reasons.push('MACD bullish crossover confirmed');
     if (nearLowerBB)       reasons.push('Price at lower Bollinger Band — support zone');
@@ -124,7 +125,7 @@ export function calculateSignal(ohlcv: OHLCV[]): SignalResult {
   } else if (sellCount >= SAFETY_RULES.minConditionsRequired && sellCount > buyCount) {
     signal = 'SELL';
     confidence = Math.round((sellCount / sellConditions.length) * 100);
-    if (rsi > 65)          reasons.push(`RSI at ${rsi.toFixed(1)} — overbought, pullback likely`);
+    if (rsi > 55)          reasons.push(`RSI at ${rsi.toFixed(1)} — overbought, pullback likely`);
     if (emaCrossedBearish) reasons.push('EMA 9 crossed below EMA 21 — bearish momentum');
     if (macdBearCross)     reasons.push('MACD bearish crossover confirmed');
     if (nearUpperBB)       reasons.push('Price at upper Bollinger Band — resistance zone');
@@ -146,7 +147,7 @@ export function calculateSignal(ohlcv: OHLCV[]): SignalResult {
     reasons,
     indicators: { rsi, ema9, ema21, macd: macd?.MACD, macdSignal: macd?.signal, bb: bb ? { upper: bb.upper, middle: bb.middle, lower: bb.lower } : undefined, adx: adx?.adx, atr, trending },
     conditions: {
-      rsi:  signal === 'BUY' ? rsi < 35 : rsi > 65,
+      rsi:  signal === 'BUY' ? rsi < 45 : rsi > 55,
       ema:  signal === 'BUY' ? (emaCrossedBullish || ema9AboveEma21) : (emaCrossedBearish || ema9BelowEma21),
       macd: signal === 'BUY' ? (macdBullCross || macdBullish) : (macdBearCross || macdBearish),
       vol:  hasVolumeData ? volumeSpike : false,

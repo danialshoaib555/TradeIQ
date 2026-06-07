@@ -5,6 +5,7 @@ import SignalFeed from '@/components/signals/SignalFeed';
 import SessionClock from '@/components/tools/SessionClock';
 import MetricCards from '@/components/dashboard/MetricCards';
 import NewsPanel from '@/components/news/NewsPanel';
+import WhaleTracker from '@/components/whales/WhaleTracker';
 
 export default function DashboardPage() {
   return (
@@ -30,6 +31,7 @@ export default function DashboardPage() {
               {/* Right column — 2 cols */}
               <div className="xl:col-span-2 flex flex-col gap-5">
                 <SessionClock />
+                <WhaleTracker />
                 <div className="flex-1 min-h-[400px]">
                   <NewsPanel />
                 </div>

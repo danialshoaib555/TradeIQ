@@ -37,7 +37,7 @@ export default function ChartPage({ params }: { params: Promise<{ pair: string }
   const [tf, setTf]           = useState<TF>('1h');
   const [chartStyle, setChartStyle] = useState<ChartStyle>('candles');
   const [tab, setTab]         = useState<Tab>('signal');
-  const [tradeType, setTradeType] = useState<'auto' | 'long' | 'short'>('auto');
+  const [tradeType, setTradeType] = useState<'auto' | 'long' | 'short' | 'spot'>('auto');
   const [ohlcv, setOhlcv]     = useState<OHLCV[]>([]);
   const [signal, setSignal]   = useState<SignalResult | null>(null);
   const [levels, setLevels]   = useState<TradeLevels | null>(null);
@@ -57,6 +57,7 @@ export default function ChartPage({ params }: { params: Promise<{ pair: string }
 
   // Auto-refresh countdown
   const [countdown, setCountdown] = useState(300);
+  const [dataSource, setDataSource] = useState('');
 
   // Fetch OHLCV
   const fetchData = useCallback(async () => {
@@ -64,6 +65,7 @@ export default function ChartPage({ params }: { params: Promise<{ pair: string }
     setOhlcv([]);
     const res = await fetch(`/api/ohlcv/${pairId}?tf=${tf}`).catch(() => null);
     if (!res?.ok) return;
+    setDataSource(res.headers.get('X-Data-Source') ?? pair.exchange);
     const data = await res.json();
     if (Array.isArray(data) && data.length >= 30) {
       setOhlcv(data);
@@ -188,7 +190,7 @@ export default function ChartPage({ params }: { params: Promise<{ pair: string }
                           className={`w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left cursor-pointer hover:bg-white/5 transition-colors ${p.id === pairId ? 'bg-white/8 text-white' : 'text-slate-300'}`}>
                           <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: MARKET_COLORS[p.market] }} />
                           <span className="font-mono font-medium">{p.name}</span>
-                          <span className="text-xs text-slate-500 ml-auto capitalize">{p.market}</span>
+                          <span className="text-xs text-slate-600 ml-auto">{p.exchange}</span>
                         </button>
                       ))}
                       {filteredPairs.length === 0 && <div className="py-6 text-center text-slate-500 text-sm">No pairs found</div>}
@@ -196,6 +198,19 @@ export default function ChartPage({ params }: { params: Promise<{ pair: string }
                   </div>
                 )}
               </div>
+
+              {/* Data source badge */}
+              {dataSource && (
+                <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-medium ${
+                  dataSource.includes('Binance')       ? 'text-amber-400 bg-amber-500/10 border-amber-500/20' :
+                  dataSource.includes('Yahoo')         ? 'text-blue-400 bg-blue-500/10 border-blue-500/20' :
+                  dataSource.includes('Frankfurter')   ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' :
+                  'text-slate-400 bg-white/5 border-white/8'
+                }`}>
+                  <span className="opacity-60">Data:</span>
+                  <span>{dataSource}</span>
+                </div>
+              )}
 
               <div className="flex-1" />
 

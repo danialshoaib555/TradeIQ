@@ -41,9 +41,9 @@ export default function SignalFeed() {
           const signal = calculateSignal(ohlcv);
           const levels = calculateLevels(ohlcv, signal.signal, pair);
           const { best } = getBestStrategy(signal);
-          setSignal(pair.id, { pairId: pair.id, pairName: pair.name, market: pair.market, signal, levels, strategy: best, price: ohlcv.at(-1)?.close ?? 0, updatedAt: Date.now(), loading: false, error: null });
+          setSignal(pair.id, { pairId: pair.id, pairName: pair.name, market: pair.market, exchange: pair.exchange, signal, levels, strategy: best, price: ohlcv.at(-1)?.close ?? 0, updatedAt: Date.now(), loading: false, error: null });
         } catch {
-          setSignal(pair.id, { pairId: pair.id, pairName: pair.name, market: pair.market, signal: WAIT_SIGNAL, levels: null, strategy: null, price: 0, updatedAt: Date.now(), loading: false, error: 'Data unavailable' });
+          setSignal(pair.id, { pairId: pair.id, pairName: pair.name, market: pair.market, exchange: pair.exchange, signal: WAIT_SIGNAL, levels: null, strategy: null, price: 0, updatedAt: Date.now(), loading: false, error: 'Data unavailable' });
         }
         done++;
         setLoadedCount(done);
@@ -182,7 +182,7 @@ export default function SignalFeed() {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-white/5">
-              {['Pair', 'Market', 'Status', 'Strategy', 'Signal', 'Confidence', 'Entry', 'TP1', 'SL', 'R:R', 'Action'].map(h => (
+              {['Pair', 'Exchange', 'Market', 'Status', 'Strategy', 'Signal', 'Confidence', 'Entry', 'TP1', 'SL', 'R:R', 'Action'].map(h => (
                 <th key={h} className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
               ))}
             </tr>
@@ -197,6 +197,14 @@ export default function SignalFeed() {
                       <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: MARKET_COLORS[row.market] }} />
                       <span className="font-mono font-medium text-white text-xs">{row.pairName}</span>
                     </div>
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium border whitespace-nowrap ${
+                      row.exchange === 'Binance'       ? 'text-amber-400 bg-amber-500/10 border-amber-500/20' :
+                      row.exchange === 'Yahoo Finance' ? 'text-blue-400 bg-blue-500/10 border-blue-500/20' :
+                      row.exchange === 'Frankfurter'   ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' :
+                      'text-slate-400 bg-white/5 border-white/8'
+                    }`}>{row.exchange ?? '—'}</span>
                   </td>
                   <td className="px-4 py-2.5 text-slate-500 capitalize text-xs">{row.market}</td>
                   <td className="px-4 py-2.5">

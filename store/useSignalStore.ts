@@ -8,6 +8,7 @@ export interface PairSignal {
   pairId: string;
   pairName: string;
   market: string;
+  exchange: string;
   signal: SignalResult;
   levels: TradeLevels | null;
   strategy: Strategy | null;
