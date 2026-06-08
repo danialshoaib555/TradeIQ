@@ -30,26 +30,23 @@ export default function ChartTradePanel({ pair, signal, levels, livePrice }: Pro
     signal?.signal === 'SELL' ? 'SHORT' : 'LONG'
   );
   const [tpTarget, setTpTarget] = useState<TpTarget>('tp2');
-  // 'use' = total balance to allocate, 'risk$' = max loss if SL hit, 'pct' = % of balance to risk
-  const [sizeMode, setSizeMode] = useState<'use' | 'risk$' | 'pct'>('use');
-  const [useUsd, setUseUsd]   = useState('');   // balance to allocate
-  const [riskUsd, setRiskUsd] = useState('');   // max loss in $
-  const [riskPct, setRiskPct] = useState('2');  // max loss in %
   const [emotion, setEmotion] = useState<EmotionTag>('disciplined');
   const [submitted, setSubmitted] = useState(false);
   const [manualEntry, setManualEntry] = useState('');
-  const [manualSl, setManualSl] = useState('');
-  const [manualTp, setManualTp] = useState('');
+  const [manualSl, setManualSl]   = useState('');
+  const [manualTp, setManualTp]   = useState('');
+
+  // Two independent fields
+  const [tradeBalance, setTradeBalance] = useState(''); // how much of balance to deploy
+  const [riskAmount,   setRiskAmount]   = useState(''); // max loss if SL hit
 
   const pipSize = pair.pipSize;
   const dp = pair.market === 'crypto' ? 2 : 5;
 
-  // Use signal levels if available, else manual
+  // Levels — signal or manual
   const useSignal = !!levels && !manualEntry && !manualSl && !manualTp;
   const entryVal  = useSignal ? levels!.entry : parseFloat(manualEntry) || livePrice || 0;
-  const slVal     = useSignal
-    ? levels!.sl
-    : parseFloat(manualSl) || 0;
+  const slVal     = useSignal ? levels!.sl     : parseFloat(manualSl) || 0;
   const tpVal     = useSignal
     ? (tpTarget === 'tp1' ? levels!.tp1 : tpTarget === 'tp2' ? levels!.tp2 : levels!.tp3)
     : parseFloat(manualTp) || 0;
@@ -58,44 +55,27 @@ export default function ChartTradePanel({ pair, signal, levels, livePrice }: Pro
   const tpPips = tpVal && entryVal ? Math.abs(tpVal - entryVal) / pipSize : 0;
   const rr     = slPips > 0 && tpPips > 0 ? tpPips / slPips : 0;
 
-  // Position sizing — three modes:
-  // 'use'   → units = allocated $ / entry price  (how much balance to deploy)
-  // 'risk$' → units = max-loss $ / (slPips × pipSize)
-  // 'pct'   → same as risk$, but max-loss = pct% of balance
-  let units = 0;
-  let riskAmount = 0;
-  let allocAmount = 0;
+  // Parsed values — both are independent; position size driven by tradeBalance
+  const allocParsed = Math.min(parseFloat(tradeBalance) || 0, balance);
+  const riskParsed  = Math.min(parseFloat(riskAmount)   || 0, allocParsed || balance);
 
-  if (sizeMode === 'use') {
-    allocAmount = Math.min(parseFloat(useUsd) || 0, balance);
-    units       = entryVal > 0 ? allocAmount / entryVal : 0;
-    riskAmount  = slPips > 0 ? units * slPips * pipSize : 0;
-  } else if (sizeMode === 'risk$') {
-    riskAmount  = Math.min(parseFloat(riskUsd) || 0, balance);
-    units       = slPips > 0 ? riskAmount / (slPips * pipSize) : 0;
-    allocAmount = entryVal > 0 ? units * entryVal : 0;
-  } else {
-    riskAmount  = (parseFloat(riskPct) / 100) * balance;
-    units       = slPips > 0 ? riskAmount / (slPips * pipSize) : 0;
-    allocAmount = entryVal > 0 ? units * entryVal : 0;
-  }
+  // Position size: based on trade balance allocation (how much to put in)
+  const units    = allocParsed > 0 && entryVal > 0 ? allocParsed / entryVal : 0;
+  const lotSize  = pair.market === 'crypto' ? units : units / 100000;
 
-  const lotSize    = pair.market === 'crypto' ? units : units / 100000;
-  const canExecute = entryVal > 0 && slVal > 0 && tpVal > 0 && (
-    sizeMode === 'use'   ? allocAmount > 0 :
-    sizeMode === 'risk$' ? riskAmount > 0 :
-    parseFloat(riskPct) > 0
-  );
+  // Max loss derived from SL distance applied to position size
+  const slLoss   = units > 0 && slPips > 0 ? units * slPips * pipSize : 0;
+
+  // Effective risk = whatever user typed, capped at slLoss (can't lose more than SL allows)
+  const effectiveRisk = riskParsed > 0 ? Math.min(riskParsed, slLoss) : slLoss;
+
+  const canExecute = entryVal > 0 && slVal > 0 && tpVal > 0 && allocParsed > 0;
 
   const signalDir: TradeDirection = signal?.signal === 'SELL' ? 'SHORT' : 'LONG';
-  const signalColor = signalDir === 'LONG' ? 'text-emerald-400' : 'text-red-400';
-  const confidence  = signal?.confidence ?? 0;
+  const confidence = signal?.confidence ?? 0;
 
   const execute = () => {
     if (!canExecute) return;
-    const strategyStr = signal
-      ? `Signal Engine (${signal.confidence}% · ${signal.signal})`
-      : 'Manual';
     openTrade({
       pairId:     pair.id,
       pairName:   pair.name,
@@ -105,42 +85,41 @@ export default function ChartTradePanel({ pair, signal, levels, livePrice }: Pro
       tp:         tpVal,
       lotSize:    Math.round(lotSize * 100) / 100,
       units:      Math.round(units),
-      riskAmount: Math.round(riskAmount * 100) / 100,
+      riskAmount: Math.round(effectiveRisk * 100) / 100,
       riskReward: Math.round(rr * 10) / 10,
       pipSize,
       market:     pair.market,
       emotion,
-      strategy:   strategyStr,
+      strategy:   signal ? `Signal Engine (${signal.confidence}% · ${signal.signal})` : 'Manual',
       note:       signal ? signal.reasons.slice(0, 2).join(' · ') : undefined,
     });
     setSubmitted(true);
     setTimeout(() => setSubmitted(false), 2500);
     setManualEntry(''); setManualSl(''); setManualTp('');
+    setTradeBalance(''); setRiskAmount('');
   };
 
   return (
     <div className="space-y-3 text-sm">
 
-      {/* Account mini-bar */}
+      {/* Account bar */}
       <div className="flex items-center justify-between bg-slate-800/60 rounded-lg px-2.5 py-2 border border-white/5">
         <div>
-          <p className="text-xs text-slate-500">Balance</p>
+          <p className="text-xs text-slate-500">Total Balance</p>
           <p className="text-xs font-mono text-white font-bold">${balance.toLocaleString('en', { minimumFractionDigits: 2 })}</p>
         </div>
         <div className="text-right">
-          <p className="text-xs text-slate-500">Open</p>
-          <p className="text-xs font-mono text-white">{openCount} pos</p>
+          <p className="text-xs text-slate-500">Open positions</p>
+          <p className="text-xs font-mono text-white">{openCount}</p>
         </div>
       </div>
 
       {/* Signal badge */}
       {signal ? (
         <div className={`rounded-lg border p-2.5 ${
-          signal.signal === 'WAIT'
-            ? 'bg-slate-800/40 border-white/8'
-            : signal.signal === 'BUY'
-              ? 'bg-emerald-500/5 border-emerald-500/20'
-              : 'bg-red-500/5 border-red-500/20'
+          signal.signal === 'WAIT' ? 'bg-slate-800/40 border-white/8'
+          : signal.signal === 'BUY' ? 'bg-emerald-500/5 border-emerald-500/20'
+          : 'bg-red-500/5 border-red-500/20'
         }`}>
           <div className="flex items-center justify-between mb-1">
             <span className={`text-xs font-bold ${
@@ -170,27 +149,19 @@ export default function ChartTradePanel({ pair, signal, levels, livePrice }: Pro
         <div className="flex gap-1.5">
           <button onClick={() => setDirection('LONG')}
             className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all border ${
-              direction === 'LONG'
-                ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
-                : 'bg-slate-900/40 text-slate-500 border-white/8 hover:text-slate-300'
-            }`}>
-            ▲ LONG
-          </button>
+              direction === 'LONG' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-slate-900/40 text-slate-500 border-white/8 hover:text-slate-300'
+            }`}>▲ LONG</button>
           <button onClick={() => setDirection('SHORT')}
             className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all border ${
-              direction === 'SHORT'
-                ? 'bg-red-500/20 text-red-400 border-red-500/30'
-                : 'bg-slate-900/40 text-slate-500 border-white/8 hover:text-slate-300'
-            }`}>
-            ▼ SHORT
-          </button>
+              direction === 'SHORT' ? 'bg-red-500/20 text-red-400 border-red-500/30' : 'bg-slate-900/40 text-slate-500 border-white/8 hover:text-slate-300'
+            }`}>▼ SHORT</button>
         </div>
         {signal && signal.signal !== 'WAIT' && direction !== signalDir && (
-          <p className="text-xs text-amber-400 mt-1">⚠ Signal suggests {signalDir} — trading against signal</p>
+          <p className="text-xs text-amber-400 mt-1">⚠ Signal suggests {signalDir}</p>
         )}
       </div>
 
-      {/* Levels — from signal or manual */}
+      {/* Entry / SL / TP */}
       {useSignal && levels ? (
         <div className="space-y-2">
           <div className="grid grid-cols-2 gap-1.5 text-xs">
@@ -203,8 +174,6 @@ export default function ChartTradePanel({ pair, signal, levels, livePrice }: Pro
               <p className="font-mono text-red-400 font-medium">{levels.sl.toFixed(dp)}</p>
             </div>
           </div>
-
-          {/* TP selector */}
           <div>
             <p className="text-xs text-slate-500 mb-1.5">Take Profit</p>
             <div className="flex gap-1">
@@ -212,9 +181,7 @@ export default function ChartTradePanel({ pair, signal, levels, livePrice }: Pro
                 <button key={key} onClick={() => setTpTarget(key)}
                   className={`flex-1 py-1.5 rounded-lg text-xs transition-all border ${
                     tpTarget === key
-                      ? direction === 'LONG'
-                        ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
-                        : 'bg-red-500/20 text-red-400 border-red-500/30'
+                      ? direction === 'LONG' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-red-500/20 text-red-400 border-red-500/30'
                       : 'bg-slate-900/40 text-slate-500 border-white/8 hover:text-slate-300'
                   }`}>
                   <div className="font-medium">{label}</div>
@@ -223,14 +190,10 @@ export default function ChartTradePanel({ pair, signal, levels, livePrice }: Pro
               ))}
             </div>
           </div>
-
           <button onClick={() => { setManualEntry(levels.entry.toFixed(dp)); setManualSl(levels.sl.toFixed(dp)); setManualTp(tpVal.toFixed(dp)); }}
-            className="text-xs text-slate-600 hover:text-slate-400 transition-colors">
-            Edit manually →
-          </button>
+            className="text-xs text-slate-600 hover:text-slate-400 transition-colors">Edit manually →</button>
         </div>
       ) : (
-        /* Manual inputs */
         <div className="space-y-1.5">
           <div className="grid grid-cols-3 gap-1.5">
             <div>
@@ -252,147 +215,102 @@ export default function ChartTradePanel({ pair, signal, levels, livePrice }: Pro
           </div>
           {levels && (
             <button onClick={() => { setManualEntry(''); setManualSl(''); setManualTp(''); }}
-              className="text-xs text-emerald-500 hover:text-emerald-400 transition-colors">
-              ← Use signal levels
-            </button>
+              className="text-xs text-emerald-500 hover:text-emerald-400 transition-colors">← Use signal levels</button>
           )}
         </div>
       )}
 
-      {/* Position sizing */}
-      <div>
-        {/* Mode tabs */}
-        <div className="flex rounded-lg overflow-hidden border border-white/8 mb-2 text-xs">
-          {([
-            ['use',   'Use Balance'],
-            ['risk$', 'Risk $'],
-            ['pct',   'Risk %'],
-          ] as [typeof sizeMode, string][]).map(([m, label]) => (
-            <button key={m} onClick={() => setSizeMode(m)}
-              className={`flex-1 py-1 transition-all ${
-                sizeMode === m
-                  ? 'bg-emerald-500/20 text-emerald-400 font-medium'
-                  : 'text-slate-500 hover:text-slate-300'
-              }`}>
-              {label}
-            </button>
-          ))}
-        </div>
+      {/* ── Two separate size fields ── */}
+      <div className="space-y-2.5">
 
-        {sizeMode === 'use' && (
-          <div className="space-y-1.5">
-            <p className="text-xs text-slate-400">How much of your balance to trade with:</p>
-            <div className="relative">
-              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400">$</span>
-              <input value={useUsd} onChange={e => setUseUsd(e.target.value)}
-                type="number" min="1" max={balance} step="50"
-                placeholder={`max $${balance.toFixed(0)}`}
-                className="w-full bg-slate-900/60 border border-white/8 rounded-lg pl-6 pr-3 py-1.5 text-xs text-white font-mono outline-none focus:border-emerald-500/30" />
-            </div>
-            <div className="flex gap-1">
-              {[
-                ['25%', Math.round(balance * 0.25)],
-                ['50%', Math.round(balance * 0.5)],
-                ['75%', Math.round(balance * 0.75)],
-                ['All', Math.floor(balance)],
-              ].map(([label, val]) => (
-                <button key={label} onClick={() => setUseUsd(String(val))}
+        {/* Field 1: Trade Balance (how much to deploy) */}
+        <div className="bg-slate-900/50 rounded-xl border border-white/8 p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-semibold text-white">Trade Balance</p>
+            <p className="text-xs text-slate-500">How much to put in</p>
+          </div>
+          <div className="relative">
+            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-mono">$</span>
+            <input value={tradeBalance} onChange={e => setTradeBalance(e.target.value)}
+              type="number" min="1" max={balance} step="100"
+              placeholder={`Available: $${balance.toFixed(0)}`}
+              className="w-full bg-slate-900/60 border border-white/8 rounded-lg pl-6 pr-3 py-2 text-xs text-white font-mono outline-none focus:border-sky-500/40" />
+          </div>
+          <div className="flex gap-1">
+            {(['25%', '50%', '75%', 'All'] as const).map((label) => {
+              const pct = label === 'All' ? 1 : parseInt(label) / 100;
+              const val = Math.floor(balance * pct);
+              return (
+                <button key={label} onClick={() => setTradeBalance(String(val))}
                   className={`flex-1 py-1 rounded text-xs transition-all border ${
-                    parseFloat(useUsd) === val
-                      ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/25'
-                      : 'bg-slate-900/40 text-slate-500 hover:text-slate-300 border-white/5'
+                    parseFloat(tradeBalance) === val
+                      ? 'bg-sky-500/20 text-sky-400 border-sky-500/25'
+                      : 'bg-slate-800/60 text-slate-500 hover:text-slate-300 border-white/5'
                   }`}>
                   {label}
                 </button>
-              ))}
-            </div>
-            {allocAmount > 0 && slPips > 0 && (
-              <p className="text-xs text-amber-400">
-                Max loss if SL hit: <span className="font-mono">${riskAmount.toFixed(2)}</span>
-                {' '}({((riskAmount / balance) * 100).toFixed(1)}% of balance)
-              </p>
-            )}
+              );
+            })}
           </div>
-        )}
+          {allocParsed > 0 && (
+            <p className="text-xs text-slate-500">
+              {((allocParsed / balance) * 100).toFixed(0)}% of balance · {Math.round(units).toLocaleString()} units
+            </p>
+          )}
+        </div>
 
-        {sizeMode === 'risk$' && (
-          <div className="space-y-1.5">
-            <p className="text-xs text-slate-400">Max dollar loss if stop loss is hit:</p>
-            <div className="relative">
-              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400">$</span>
-              <input value={riskUsd} onChange={e => setRiskUsd(e.target.value)}
-                type="number" min="1" max={balance} step="10"
-                placeholder={`e.g. ${Math.round(balance * 0.02)}`}
-                className="w-full bg-slate-900/60 border border-white/8 rounded-lg pl-6 pr-3 py-1.5 text-xs text-white font-mono outline-none focus:border-emerald-500/30" />
-            </div>
-            <div className="flex gap-1">
-              {[50, 100, 200, 500].filter(v => v <= balance).map(v => (
-                <button key={v} onClick={() => setRiskUsd(String(v))}
-                  className={`flex-1 py-1 rounded text-xs transition-all border ${
-                    parseFloat(riskUsd) === v
-                      ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/25'
-                      : 'bg-slate-900/40 text-slate-500 hover:text-slate-300 border-white/5'
-                  }`}>
-                  ${v}
-                </button>
-              ))}
-            </div>
-            {riskAmount > 0 && (
-              <p className="text-xs text-slate-600">
-                = {((riskAmount / balance) * 100).toFixed(1)}% of balance
-                {allocAmount > 0 && ` · Uses $${allocAmount.toFixed(0)}`}
-              </p>
-            )}
+        {/* Field 2: Risk Amount (max loss) */}
+        <div className="bg-slate-900/50 rounded-xl border border-white/8 p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-semibold text-white">Risk Amount</p>
+            <p className="text-xs text-slate-500">Max loss if SL hit</p>
           </div>
-        )}
-
-        {sizeMode === 'pct' && (
-          <div className="space-y-1.5">
-            <p className="text-xs text-slate-400">% of balance to risk if SL is hit:</p>
-            <div className="relative">
-              <input value={riskPct} onChange={e => setRiskPct(e.target.value)}
-                type="number" min="0.1" max="100" step="0.5"
-                className="w-full bg-slate-900/60 border border-white/8 rounded-lg px-3 pr-6 py-1.5 text-xs text-white font-mono outline-none focus:border-emerald-500/30" />
-              <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400">%</span>
-            </div>
-            <div className="flex gap-1">
-              {['1', '2', '5', '10'].map(v => (
-                <button key={v} onClick={() => setRiskPct(v)}
-                  className={`flex-1 py-1 rounded text-xs transition-all border ${
-                    riskPct === v
-                      ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/25'
-                      : 'bg-slate-900/40 text-slate-500 hover:text-slate-300 border-white/5'
-                  }`}>
-                  {v}%
-                </button>
-              ))}
-            </div>
-            {riskAmount > 0 && (
-              <p className="text-xs text-slate-600">
-                = ${riskAmount.toFixed(2)} max loss
-                {allocAmount > 0 && ` · Uses $${allocAmount.toFixed(0)}`}
-              </p>
-            )}
+          <div className="relative">
+            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-mono">$</span>
+            <input value={riskAmount} onChange={e => setRiskAmount(e.target.value)}
+              type="number" min="1" max={allocParsed || balance} step="10"
+              placeholder={slLoss > 0 ? `SL = $${slLoss.toFixed(0)}` : 'e.g. 200'}
+              className="w-full bg-slate-900/60 border border-white/8 rounded-lg pl-6 pr-3 py-2 text-xs text-white font-mono outline-none focus:border-amber-500/40" />
           </div>
-        )}
+          <div className="flex gap-1">
+            {[50, 100, 200, 500].map(v => (
+              <button key={v} onClick={() => setRiskAmount(String(v))}
+                className={`flex-1 py-1 rounded text-xs transition-all border ${
+                  parseFloat(riskAmount) === v
+                    ? 'bg-amber-500/20 text-amber-400 border-amber-500/25'
+                    : 'bg-slate-800/60 text-slate-500 hover:text-slate-300 border-white/5'
+                }`}>
+                ${v}
+              </button>
+            ))}
+          </div>
+          {slLoss > 0 && (
+            <p className={`text-xs ${riskParsed > slLoss ? 'text-amber-400' : 'text-slate-500'}`}>
+              {riskParsed > 0
+                ? riskParsed > slLoss
+                  ? `Capped at SL loss: $${slLoss.toFixed(2)}`
+                  : `${((riskParsed / balance) * 100).toFixed(1)}% of total balance`
+                : `SL-based max loss: $${slLoss.toFixed(2)} (${((slLoss / balance) * 100).toFixed(1)}%)`
+              }
+            </p>
+          )}
+        </div>
       </div>
 
-      {/* R:R preview */}
+      {/* Trade summary */}
       {canExecute && (
-        <div className="flex items-center gap-3 bg-slate-900/40 rounded-lg px-3 py-2 border border-white/5 text-xs">
-          <div>
-            <span className="text-slate-500">R:R </span>
-            <span className={`font-mono font-bold ${rr >= 2 ? 'text-emerald-400' : rr >= 1 ? 'text-amber-400' : 'text-red-400'}`}>1:{rr.toFixed(1)}</span>
+        <div className="grid grid-cols-3 gap-1.5 text-xs">
+          <div className="bg-slate-900/40 rounded-lg p-2 border border-white/5 text-center">
+            <p className="text-slate-500">R:R</p>
+            <p className={`font-mono font-bold ${rr >= 2 ? 'text-emerald-400' : rr >= 1 ? 'text-amber-400' : 'text-red-400'}`}>1:{rr.toFixed(1)}</p>
           </div>
-          <div className="h-3 w-px bg-white/10" />
-          <div>
-            <span className="text-slate-500">Size </span>
-            <span className="font-mono text-white">{Math.round(units).toLocaleString()}</span>
+          <div className="bg-slate-900/40 rounded-lg p-2 border border-white/5 text-center">
+            <p className="text-slate-500">At risk</p>
+            <p className="font-mono font-bold text-amber-400">${effectiveRisk.toFixed(0)}</p>
           </div>
-          <div className="h-3 w-px bg-white/10" />
-          <div>
-            <span className="text-slate-500">Pips </span>
-            <span className="font-mono text-white">{slPips.toFixed(1)}</span>
+          <div className="bg-slate-900/40 rounded-lg p-2 border border-white/5 text-center">
+            <p className="text-slate-500">SL pips</p>
+            <p className="font-mono font-bold text-white">{slPips.toFixed(1)}</p>
           </div>
         </div>
       )}
@@ -409,23 +327,20 @@ export default function ChartTradePanel({ pair, signal, levels, livePrice }: Pro
       {/* Execute */}
       <button onClick={execute} disabled={!canExecute}
         className={`w-full py-2.5 rounded-xl text-sm font-bold transition-all ${
-          submitted
-            ? 'bg-emerald-500/30 text-emerald-300 border border-emerald-500/30'
-            : canExecute
-              ? direction === 'LONG'
-                ? 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/30'
-                : 'bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30'
-              : 'bg-slate-800/60 text-slate-600 border border-white/5 cursor-not-allowed'
-        }`}>
-        {submitted
-          ? '✓ Trade Opened!'
+          submitted ? 'bg-emerald-500/30 text-emerald-300 border border-emerald-500/30'
           : canExecute
-            ? `Execute ${direction} — ${pair.name}`
-            : 'Set entry, SL & TP'}
+            ? direction === 'LONG'
+              ? 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/30'
+              : 'bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30'
+            : 'bg-slate-800/60 text-slate-600 border border-white/5 cursor-not-allowed'
+        }`}>
+        {submitted ? '✓ Trade Opened!'
+          : canExecute ? `Execute ${direction} — ${pair.name}`
+          : 'Set Trade Balance to continue'}
       </button>
 
       {submitted && (
-        <p className="text-xs text-center text-slate-500">View in Demo Trading → Open Positions</p>
+        <p className="text-xs text-center text-slate-500">Check Demo Trading → Open Positions</p>
       )}
     </div>
   );

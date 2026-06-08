@@ -57,7 +57,7 @@ export default function ChartPage({ params }: { params: Promise<{ pair: string }
   const dropRef = useRef<HTMLDivElement>(null);
 
   // Auto-refresh countdown
-  const [countdown, setCountdown] = useState(300);
+  const [countdown, setCountdown] = useState(30);
   const [dataSource, setDataSource] = useState('');
   const [livePrice, setLivePrice] = useState<number | null>(null);
 
@@ -121,7 +121,7 @@ export default function ChartPage({ params }: { params: Promise<{ pair: string }
 
   useEffect(() => {
     setSignal(null); setLevels(null); setForcedLevels(null);
-    setBacktestResults(null); setCountdown(300);
+    setBacktestResults(null); setCountdown(5);
     fetchData();
   }, [fetchData]);
 
@@ -129,7 +129,7 @@ export default function ChartPage({ params }: { params: Promise<{ pair: string }
   useEffect(() => {
     const id = setInterval(() => {
       setCountdown(c => {
-        if (c <= 1) { fetchData(); return 300; }
+        if (c <= 1) { fetchData(); return 30; }
         return c - 1;
       });
     }, 1000);
@@ -261,7 +261,7 @@ export default function ChartPage({ params }: { params: Promise<{ pair: string }
               <div className="flex items-center gap-1.5 bg-white/3 border border-white/8 rounded-xl px-3 py-1.5">
                 <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                 <span className="text-xs font-mono text-slate-400">{mmSS(countdown)}</span>
-                <button onClick={() => { fetchData(); setCountdown(300); }}
+                <button onClick={() => { fetchData(); setCountdown(30); }}
                   className="ml-1 text-slate-500 hover:text-slate-300 transition-colors cursor-pointer" title="Refresh now">
                   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
