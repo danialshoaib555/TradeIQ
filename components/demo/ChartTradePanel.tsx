@@ -30,9 +30,11 @@ export default function ChartTradePanel({ pair, signal, levels, livePrice }: Pro
     signal?.signal === 'SELL' ? 'SHORT' : 'LONG'
   );
   const [tpTarget, setTpTarget] = useState<TpTarget>('tp2');
-  const [riskMode, setRiskMode] = useState<'pct' | 'usd'>('pct');
-  const [riskPct, setRiskPct] = useState('2');
-  const [riskUsd, setRiskUsd] = useState('');
+  // 'use' = total balance to allocate, 'risk$' = max loss if SL hit, 'pct' = % of balance to risk
+  const [sizeMode, setSizeMode] = useState<'use' | 'risk$' | 'pct'>('use');
+  const [useUsd, setUseUsd]   = useState('');   // balance to allocate
+  const [riskUsd, setRiskUsd] = useState('');   // max loss in $
+  const [riskPct, setRiskPct] = useState('2');  // max loss in %
   const [emotion, setEmotion] = useState<EmotionTag>('disciplined');
   const [submitted, setSubmitted] = useState(false);
   const [manualEntry, setManualEntry] = useState('');
@@ -52,16 +54,38 @@ export default function ChartTradePanel({ pair, signal, levels, livePrice }: Pro
     ? (tpTarget === 'tp1' ? levels!.tp1 : tpTarget === 'tp2' ? levels!.tp2 : levels!.tp3)
     : parseFloat(manualTp) || 0;
 
-  const riskAmount = riskMode === 'usd'
-    ? Math.min(parseFloat(riskUsd) || 0, balance)
-    : (parseFloat(riskPct) / 100) * balance;
-  const slPips  = slVal && entryVal ? Math.abs(entryVal - slVal) / pipSize : 0;
-  const tpPips  = tpVal && entryVal ? Math.abs(tpVal - entryVal) / pipSize : 0;
-  const rr      = slPips > 0 && tpPips > 0 ? tpPips / slPips : 0;
-  const units   = slPips > 0 ? riskAmount / (slPips * pipSize) : 0;
-  const lotSize = pair.market === 'crypto' ? units : units / 100000;
+  const slPips = slVal && entryVal ? Math.abs(entryVal - slVal) / pipSize : 0;
+  const tpPips = tpVal && entryVal ? Math.abs(tpVal - entryVal) / pipSize : 0;
+  const rr     = slPips > 0 && tpPips > 0 ? tpPips / slPips : 0;
 
-  const canExecute = entryVal > 0 && slVal > 0 && tpVal > 0 && parseFloat(riskPct) > 0;
+  // Position sizing — three modes:
+  // 'use'   → units = allocated $ / entry price  (how much balance to deploy)
+  // 'risk$' → units = max-loss $ / (slPips × pipSize)
+  // 'pct'   → same as risk$, but max-loss = pct% of balance
+  let units = 0;
+  let riskAmount = 0;
+  let allocAmount = 0;
+
+  if (sizeMode === 'use') {
+    allocAmount = Math.min(parseFloat(useUsd) || 0, balance);
+    units       = entryVal > 0 ? allocAmount / entryVal : 0;
+    riskAmount  = slPips > 0 ? units * slPips * pipSize : 0;
+  } else if (sizeMode === 'risk$') {
+    riskAmount  = Math.min(parseFloat(riskUsd) || 0, balance);
+    units       = slPips > 0 ? riskAmount / (slPips * pipSize) : 0;
+    allocAmount = entryVal > 0 ? units * entryVal : 0;
+  } else {
+    riskAmount  = (parseFloat(riskPct) / 100) * balance;
+    units       = slPips > 0 ? riskAmount / (slPips * pipSize) : 0;
+    allocAmount = entryVal > 0 ? units * entryVal : 0;
+  }
+
+  const lotSize    = pair.market === 'crypto' ? units : units / 100000;
+  const canExecute = entryVal > 0 && slVal > 0 && tpVal > 0 && (
+    sizeMode === 'use'   ? allocAmount > 0 :
+    sizeMode === 'risk$' ? riskAmount > 0 :
+    parseFloat(riskPct) > 0
+  );
 
   const signalDir: TradeDirection = signal?.signal === 'SELL' ? 'SHORT' : 'LONG';
   const signalColor = signalDir === 'LONG' ? 'text-emerald-400' : 'text-red-400';
@@ -235,36 +259,72 @@ export default function ChartTradePanel({ pair, signal, levels, livePrice }: Pro
         </div>
       )}
 
-      {/* Risk input */}
+      {/* Position sizing */}
       <div>
-        <div className="flex items-center justify-between mb-1.5">
-          <p className="text-xs text-slate-500">Amount to risk</p>
-          {/* Mode toggle */}
-          <div className="flex rounded-lg overflow-hidden border border-white/8 text-xs">
-            <button onClick={() => setRiskMode('usd')}
-              className={`px-2 py-0.5 transition-all ${riskMode === 'usd' ? 'bg-emerald-500/20 text-emerald-400' : 'text-slate-500 hover:text-slate-300'}`}>
-              $
+        {/* Mode tabs */}
+        <div className="flex rounded-lg overflow-hidden border border-white/8 mb-2 text-xs">
+          {([
+            ['use',   'Use Balance'],
+            ['risk$', 'Risk $'],
+            ['pct',   'Risk %'],
+          ] as [typeof sizeMode, string][]).map(([m, label]) => (
+            <button key={m} onClick={() => setSizeMode(m)}
+              className={`flex-1 py-1 transition-all ${
+                sizeMode === m
+                  ? 'bg-emerald-500/20 text-emerald-400 font-medium'
+                  : 'text-slate-500 hover:text-slate-300'
+              }`}>
+              {label}
             </button>
-            <button onClick={() => setRiskMode('pct')}
-              className={`px-2 py-0.5 transition-all ${riskMode === 'pct' ? 'bg-emerald-500/20 text-emerald-400' : 'text-slate-500 hover:text-slate-300'}`}>
-              %
-            </button>
-          </div>
+          ))}
         </div>
 
-        {riskMode === 'usd' ? (
+        {sizeMode === 'use' && (
           <div className="space-y-1.5">
+            <p className="text-xs text-slate-400">How much of your balance to trade with:</p>
             <div className="relative">
               <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400">$</span>
-              <input
-                value={riskUsd}
-                onChange={e => setRiskUsd(e.target.value)}
+              <input value={useUsd} onChange={e => setUseUsd(e.target.value)}
+                type="number" min="1" max={balance} step="50"
+                placeholder={`max $${balance.toFixed(0)}`}
+                className="w-full bg-slate-900/60 border border-white/8 rounded-lg pl-6 pr-3 py-1.5 text-xs text-white font-mono outline-none focus:border-emerald-500/30" />
+            </div>
+            <div className="flex gap-1">
+              {[
+                ['25%', Math.round(balance * 0.25)],
+                ['50%', Math.round(balance * 0.5)],
+                ['75%', Math.round(balance * 0.75)],
+                ['All', Math.floor(balance)],
+              ].map(([label, val]) => (
+                <button key={label} onClick={() => setUseUsd(String(val))}
+                  className={`flex-1 py-1 rounded text-xs transition-all border ${
+                    parseFloat(useUsd) === val
+                      ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/25'
+                      : 'bg-slate-900/40 text-slate-500 hover:text-slate-300 border-white/5'
+                  }`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            {allocAmount > 0 && slPips > 0 && (
+              <p className="text-xs text-amber-400">
+                Max loss if SL hit: <span className="font-mono">${riskAmount.toFixed(2)}</span>
+                {' '}({((riskAmount / balance) * 100).toFixed(1)}% of balance)
+              </p>
+            )}
+          </div>
+        )}
+
+        {sizeMode === 'risk$' && (
+          <div className="space-y-1.5">
+            <p className="text-xs text-slate-400">Max dollar loss if stop loss is hit:</p>
+            <div className="relative">
+              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400">$</span>
+              <input value={riskUsd} onChange={e => setRiskUsd(e.target.value)}
                 type="number" min="1" max={balance} step="10"
                 placeholder={`e.g. ${Math.round(balance * 0.02)}`}
-                className="w-full bg-slate-900/60 border border-white/8 rounded-lg pl-6 pr-3 py-1.5 text-xs text-white font-mono outline-none focus:border-emerald-500/30"
-              />
+                className="w-full bg-slate-900/60 border border-white/8 rounded-lg pl-6 pr-3 py-1.5 text-xs text-white font-mono outline-none focus:border-emerald-500/30" />
             </div>
-            {/* Quick $ presets */}
             <div className="flex gap-1">
               {[50, 100, 200, 500].filter(v => v <= balance).map(v => (
                 <button key={v} onClick={() => setRiskUsd(String(v))}
@@ -277,19 +337,24 @@ export default function ChartTradePanel({ pair, signal, levels, livePrice }: Pro
                 </button>
               ))}
             </div>
-            <p className="text-xs text-slate-600">
-              = {riskUsd && balance ? ((parseFloat(riskUsd) / balance) * 100).toFixed(1) : '0.0'}% of ${balance.toFixed(0)} balance
-            </p>
+            {riskAmount > 0 && (
+              <p className="text-xs text-slate-600">
+                = {((riskAmount / balance) * 100).toFixed(1)}% of balance
+                {allocAmount > 0 && ` · Uses $${allocAmount.toFixed(0)}`}
+              </p>
+            )}
           </div>
-        ) : (
+        )}
+
+        {sizeMode === 'pct' && (
           <div className="space-y-1.5">
+            <p className="text-xs text-slate-400">% of balance to risk if SL is hit:</p>
             <div className="relative">
               <input value={riskPct} onChange={e => setRiskPct(e.target.value)}
                 type="number" min="0.1" max="100" step="0.5"
                 className="w-full bg-slate-900/60 border border-white/8 rounded-lg px-3 pr-6 py-1.5 text-xs text-white font-mono outline-none focus:border-emerald-500/30" />
               <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400">%</span>
             </div>
-            {/* Quick % presets */}
             <div className="flex gap-1">
               {['1', '2', '5', '10'].map(v => (
                 <button key={v} onClick={() => setRiskPct(v)}
@@ -302,9 +367,12 @@ export default function ChartTradePanel({ pair, signal, levels, livePrice }: Pro
                 </button>
               ))}
             </div>
-            <p className="text-xs text-slate-600">
-              = ${riskAmount.toFixed(2)} of ${balance.toFixed(0)} balance
-            </p>
+            {riskAmount > 0 && (
+              <p className="text-xs text-slate-600">
+                = ${riskAmount.toFixed(2)} max loss
+                {allocAmount > 0 && ` · Uses $${allocAmount.toFixed(0)}`}
+              </p>
+            )}
           </div>
         )}
       </div>
