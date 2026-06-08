@@ -55,18 +55,20 @@ export default function ChartTradePanel({ pair, signal, levels, livePrice }: Pro
   const tpPips = tpVal && entryVal ? Math.abs(tpVal - entryVal) / pipSize : 0;
   const rr     = slPips > 0 && tpPips > 0 ? tpPips / slPips : 0;
 
-  // Parsed values — both are independent; position size driven by tradeBalance
+  // Trade balance — what the user is deploying for this trade
   const allocParsed = Math.min(parseFloat(tradeBalance) || 0, balance);
-  const riskParsed  = Math.min(parseFloat(riskAmount)   || 0, allocParsed || balance);
 
-  // Position size: based on trade balance allocation (how much to put in)
-  const units    = allocParsed > 0 && entryVal > 0 ? allocParsed / entryVal : 0;
-  const lotSize  = pair.market === 'crypto' ? units : units / 100000;
+  // Risk amount — portion of the TRADE BALANCE they're willing to lose (not total account)
+  const riskParsed = Math.min(parseFloat(riskAmount) || 0, allocParsed);
 
-  // Max loss derived from SL distance applied to position size
-  const slLoss   = units > 0 && slPips > 0 ? units * slPips * pipSize : 0;
+  // Position size from allocation
+  const units   = allocParsed > 0 && entryVal > 0 ? allocParsed / entryVal : 0;
+  const lotSize = pair.market === 'crypto' ? units : units / 100000;
 
-  // Effective risk = whatever user typed, capped at slLoss (can't lose more than SL allows)
+  // SL-based max loss from position size
+  const slLoss = units > 0 && slPips > 0 ? units * slPips * pipSize : 0;
+
+  // Effective risk = user's risk input (capped at slLoss), or slLoss if not set
   const effectiveRisk = riskParsed > 0 ? Math.min(riskParsed, slLoss) : slLoss;
 
   const canExecute = entryVal > 0 && slVal > 0 && tpVal > 0 && allocParsed > 0;
@@ -259,38 +261,49 @@ export default function ChartTradePanel({ pair, signal, levels, livePrice }: Pro
           )}
         </div>
 
-        {/* Field 2: Risk Amount (max loss) */}
-        <div className="bg-slate-900/50 rounded-xl border border-white/8 p-3 space-y-2">
+        {/* Field 2: Risk Amount (% of trade balance) */}
+        <div className={`bg-slate-900/50 rounded-xl border p-3 space-y-2 ${allocParsed > 0 ? 'border-white/8' : 'border-white/4 opacity-50'}`}>
           <div className="flex items-center justify-between">
             <p className="text-xs font-semibold text-white">Risk Amount</p>
-            <p className="text-xs text-slate-500">Max loss if SL hit</p>
+            <p className="text-xs text-slate-500">
+              {allocParsed > 0 ? `of $${allocParsed.toFixed(0)} trade balance` : 'set trade balance first'}
+            </p>
           </div>
           <div className="relative">
             <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-mono">$</span>
             <input value={riskAmount} onChange={e => setRiskAmount(e.target.value)}
-              type="number" min="1" max={allocParsed || balance} step="10"
-              placeholder={slLoss > 0 ? `SL = $${slLoss.toFixed(0)}` : 'e.g. 200'}
-              className="w-full bg-slate-900/60 border border-white/8 rounded-lg pl-6 pr-3 py-2 text-xs text-white font-mono outline-none focus:border-amber-500/40" />
+              type="number" min="1" max={allocParsed} step="10"
+              disabled={allocParsed === 0}
+              placeholder={allocParsed > 0 ? (slLoss > 0 ? `SL-based: $${slLoss.toFixed(0)}` : `max $${allocParsed.toFixed(0)}`) : '—'}
+              className="w-full bg-slate-900/60 border border-white/8 rounded-lg pl-6 pr-3 py-2 text-xs text-white font-mono outline-none focus:border-amber-500/40 disabled:cursor-not-allowed" />
           </div>
+          {/* Quick % of trade balance */}
           <div className="flex gap-1">
-            {[50, 100, 200, 500].map(v => (
-              <button key={v} onClick={() => setRiskAmount(String(v))}
-                className={`flex-1 py-1 rounded text-xs transition-all border ${
-                  parseFloat(riskAmount) === v
-                    ? 'bg-amber-500/20 text-amber-400 border-amber-500/25'
-                    : 'bg-slate-800/60 text-slate-500 hover:text-slate-300 border-white/5'
-                }`}>
-                ${v}
-              </button>
-            ))}
+            {(['10%', '25%', '50%', '100%'] as const).map(label => {
+              const pct = parseInt(label) / 100;
+              const val = Math.floor(allocParsed * pct);
+              return (
+                <button key={label} onClick={() => setRiskAmount(String(val))}
+                  disabled={allocParsed === 0}
+                  className={`flex-1 py-1 rounded text-xs transition-all border ${
+                    parseFloat(riskAmount) === val && val > 0
+                      ? 'bg-amber-500/20 text-amber-400 border-amber-500/25'
+                      : 'bg-slate-800/60 text-slate-500 hover:text-slate-300 border-white/5 disabled:cursor-not-allowed'
+                  }`}>
+                  {label}
+                </button>
+              );
+            })}
           </div>
-          {slLoss > 0 && (
-            <p className={`text-xs ${riskParsed > slLoss ? 'text-amber-400' : 'text-slate-500'}`}>
+          {allocParsed > 0 && (
+            <p className={`text-xs ${riskParsed > slLoss && slLoss > 0 ? 'text-amber-400' : 'text-slate-500'}`}>
               {riskParsed > 0
-                ? riskParsed > slLoss
-                  ? `Capped at SL loss: $${slLoss.toFixed(2)}`
-                  : `${((riskParsed / balance) * 100).toFixed(1)}% of total balance`
-                : `SL-based max loss: $${slLoss.toFixed(2)} (${((slLoss / balance) * 100).toFixed(1)}%)`
+                ? riskParsed > slLoss && slLoss > 0
+                  ? `Capped at SL: $${slLoss.toFixed(2)}`
+                  : `${((riskParsed / allocParsed) * 100).toFixed(0)}% of your $${allocParsed.toFixed(0)} trade balance`
+                : slLoss > 0
+                  ? `SL will cost $${slLoss.toFixed(2)} (${((slLoss / allocParsed) * 100).toFixed(0)}% of trade balance)`
+                  : 'Enter entry & SL to see max loss'
               }
             </p>
           )}
@@ -307,6 +320,7 @@ export default function ChartTradePanel({ pair, signal, levels, livePrice }: Pro
           <div className="bg-slate-900/40 rounded-lg p-2 border border-white/5 text-center">
             <p className="text-slate-500">At risk</p>
             <p className="font-mono font-bold text-amber-400">${effectiveRisk.toFixed(0)}</p>
+            {allocParsed > 0 && <p className="text-xs text-slate-600">{((effectiveRisk / allocParsed) * 100).toFixed(0)}% of trade</p>}
           </div>
           <div className="bg-slate-900/40 rounded-lg p-2 border border-white/5 text-center">
             <p className="text-slate-500">SL pips</p>
