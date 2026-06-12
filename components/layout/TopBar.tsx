@@ -48,10 +48,10 @@ export default function TopBar() {
         </div>
       )}
 
-      <header className="bg-slate-900/60 backdrop-blur-xl border-b border-white/5 px-6 py-3 flex items-center justify-between sticky top-0 z-40">
-        <div className="flex items-center gap-4">
-          <span className="font-mono text-sm text-slate-300">{time}</span>
-          <div className="flex items-center gap-2">
+      <header className="bg-slate-900/60 backdrop-blur-xl border-b border-white/5 pl-16 lg:pl-6 pr-4 lg:pr-6 py-3 flex items-center justify-between gap-2 sticky top-0 z-30 min-w-0">
+        <div className="flex items-center gap-4 min-w-0">
+          <span className="font-mono text-sm text-slate-300 whitespace-nowrap">{time}</span>
+          <div className="hidden md:flex items-center gap-2">
             {sessions.map(s => (
               <span key={s.name} className={`px-2 py-0.5 rounded text-xs font-medium border transition-all ${
                 s.isOpen
@@ -63,7 +63,7 @@ export default function TopBar() {
             ))}
           </div>
         </div>
-        <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium ${qualityColors[bestSession.quality] ?? qualityColors.poor}`}>
+        <div className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium whitespace-nowrap flex-shrink-0 ${qualityColors[bestSession.quality] ?? qualityColors.poor}`}>
           <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${
             bestSession.quality === 'best'     ? 'bg-emerald-400' :
             bestSession.quality === 'good'     ? 'bg-blue-400'    :

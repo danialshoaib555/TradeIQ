@@ -15,12 +15,13 @@ import { getBestStrategy, type Strategy } from '@/lib/strategyMatcher';
 import { runBacktest, STRATEGY_KEYS, type StrategyKey, type BacktestResult, type BacktestTrade } from '@/lib/backtester';
 import type { ChartStyle } from '@/components/chart/LiveChart';
 import ChartTradePanel from '@/components/demo/ChartTradePanel';
+import PriceAlerts from '@/components/chart/PriceAlerts';
 
 const LiveChart = dynamic(() => import('@/components/chart/LiveChart'), { ssr: false });
 
 const TFS = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '12h', '1D', '1W', '1M'] as const;
 type TF = typeof TFS[number];
-type Tab = 'signal' | 'strategy' | 'trade';
+type Tab = 'signal' | 'strategy' | 'trade' | 'alerts';
 
 const CHART_STYLES: { key: ChartStyle; label: string; icon: string }[] = [
   { key: 'candles',     label: 'Candles',     icon: '▤' },
@@ -56,30 +57,27 @@ export default function ChartPage({ params }: { params: Promise<{ pair: string }
   const [showDrop, setShowDrop] = useState(false);
   const dropRef = useRef<HTMLDivElement>(null);
 
-  // Auto-refresh countdown
-  const [countdown, setCountdown] = useState(30);
   const [dataSource, setDataSource] = useState('');
   const [livePrice, setLivePrice] = useState<number | null>(null);
+  const [isLive, setIsLive] = useState(false);
+  const ohlcvRef = useRef<OHLCV[]>([]);
 
-  // Fetch OHLCV — crypto fetches Binance directly from browser to avoid Vercel server IP blocks
+  const TF_BINANCE: Record<string, string> = {
+    '1m':'1m','3m':'3m','5m':'5m','15m':'15m','30m':'30m',
+    '1h':'1h','2h':'2h','4h':'4h','6h':'6h','12h':'12h',
+    '1D':'1d','1W':'1w','1M':'1M',
+  };
+  const TF_LIMIT: Record<string, number> = {
+    '1m':300,'3m':300,'5m':300,'15m':400,'30m':500,
+    '1h':500,'2h':500,'4h':500,'6h':500,'12h':500,
+    '1D':365,'1W':200,'1M':60,
+  };
+
+  // Initial historical fetch
   const fetchData = useCallback(async () => {
     if (!pair) return;
-    setOhlcv([]);
-
-    const TF_BINANCE: Record<string, string> = {
-      '1m':'1m','3m':'3m','5m':'5m','15m':'15m','30m':'30m',
-      '1h':'1h','2h':'2h','4h':'4h','6h':'6h','12h':'12h',
-      '1D':'1d','1W':'1w','1M':'1M',
-    };
-    const TF_LIMIT: Record<string, number> = {
-      '1m':300,'3m':300,'5m':300,'15m':400,'30m':500,
-      '1h':500,'2h':500,'4h':500,'6h':500,'12h':500,
-      '1D':365,'1W':200,'1M':60,
-    };
-
     try {
       let data: OHLCV[] = [];
-
       if (pair.market === 'crypto' && pair.binanceSymbol) {
         const interval = TF_BINANCE[tf] ?? '1h';
         const limit = TF_LIMIT[tf] ?? 500;
@@ -88,25 +86,21 @@ export default function ChartPage({ params }: { params: Promise<{ pair: string }
         );
         if (!res.ok) throw new Error(`Binance ${res.status}`);
         const raw: string[][] = await res.json();
-        data = raw
-          .map(k => ({
-            time:   Math.floor(parseInt(k[0]) / 1000),
-            open:   parseFloat(k[1]),
-            high:   parseFloat(k[2]),
-            low:    parseFloat(k[3]),
-            close:  parseFloat(k[4]),
-            volume: parseFloat(k[5]),
-          }))
-          .filter(c => c.close > 0 && c.time > 0);
-        setDataSource(`Binance (${interval})`);
+        data = raw.map(k => ({
+          time: Math.floor(parseInt(k[0]) / 1000),
+          open: parseFloat(k[1]), high: parseFloat(k[2]),
+          low: parseFloat(k[3]),  close: parseFloat(k[4]),
+          volume: parseFloat(k[5]),
+        })).filter(c => c.close > 0 && c.time > 0);
+        setDataSource(`Binance · LIVE`);
       } else {
         const res = await fetch(`/api/ohlcv/${pairId}?tf=${tf}`);
         if (!res.ok) throw new Error('API error');
         setDataSource(res.headers.get('X-Data-Source') ?? pair.exchange);
         data = await res.json();
       }
-
       if (Array.isArray(data) && data.length >= 30) {
+        ohlcvRef.current = data;
         setOhlcv(data);
         setLivePrice(data[data.length - 1].close);
         const sig = calculateSignal(data);
@@ -119,22 +113,86 @@ export default function ChartPage({ params }: { params: Promise<{ pair: string }
     }
   }, [pair, pairId, tf]);
 
+  // Initial load + reset on pair/tf change
   useEffect(() => {
     setSignal(null); setLevels(null); setForcedLevels(null);
-    setBacktestResults(null); setCountdown(5);
+    setBacktestResults(null); setIsLive(false);
     fetchData();
   }, [fetchData]);
 
-  // Countdown + auto-refresh
+  // ── Real-time WebSocket for crypto ─────────────────────────────────────────
   useEffect(() => {
-    const id = setInterval(() => {
-      setCountdown(c => {
-        if (c <= 1) { fetchData(); return 30; }
-        return c - 1;
+    if (!pair || pair.market !== 'crypto' || !pair.binanceSymbol) return;
+    const interval = TF_BINANCE[tf] ?? '1h';
+    const sym = pair.binanceSymbol.toLowerCase();
+    const ws = new WebSocket(`wss://stream.binance.com:9443/ws/${sym}@kline_${interval}`);
+
+    ws.onopen = () => setIsLive(true);
+    ws.onclose = () => setIsLive(false);
+
+    ws.onmessage = (e) => {
+      const msg = JSON.parse(e.data);
+      const k = msg.k;
+      if (!k) return;
+
+      const updatedCandle: OHLCV = {
+        time:   Math.floor(k.t / 1000),
+        open:   parseFloat(k.o),
+        high:   parseFloat(k.h),
+        low:    parseFloat(k.l),
+        close:  parseFloat(k.c),
+        volume: parseFloat(k.v),
+      };
+
+      setLivePrice(updatedCandle.close);
+
+      setOhlcv(prev => {
+        const next = [...prev];
+        const last = next[next.length - 1];
+        if (last && last.time === updatedCandle.time) {
+          next[next.length - 1] = updatedCandle; // update current candle
+        } else if (updatedCandle.time > (last?.time ?? 0)) {
+          next.push(updatedCandle); // new candle opened
+          if (next.length > 600) next.shift(); // keep bounded
+        }
+        ohlcvRef.current = next;
+
+        // Recalculate signal only on closed candles (k.x = true) or every 10s
+        if (k.x && next.length >= 30) {
+          const sig = calculateSignal(next);
+          setSignal(sig);
+          const { best } = getBestStrategy(sig);
+          setStrategy(best);
+        }
+        return next;
       });
-    }, 1000);
+    };
+
+    return () => { ws.close(); setIsLive(false); };
+  }, [pair, tf]);
+
+  // ── Fallback poll for forex/stocks (60s — no free WebSocket) ───────────────
+  useEffect(() => {
+    if (!pair || pair.market === 'crypto') return;
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/ohlcv/${pairId}?tf=${tf}`);
+        if (!res.ok) return;
+        const data: OHLCV[] = await res.json();
+        if (Array.isArray(data) && data.length >= 30) {
+          ohlcvRef.current = data;
+          setOhlcv(data);
+          setLivePrice(data[data.length - 1].close);
+          const sig = calculateSignal(data);
+          setSignal(sig);
+          const { best } = getBestStrategy(sig);
+          setStrategy(best);
+        }
+      } catch {}
+    };
+    const id = setInterval(poll, 60_000);
     return () => clearInterval(id);
-  }, [fetchData]);
+  }, [pair, pairId, tf]);
 
   // Recalculate levels when signal/tradeType changes
   useEffect(() => {
@@ -188,7 +246,6 @@ export default function ChartPage({ params }: { params: Promise<{ pair: string }
     p.name.toLowerCase().includes(search.toLowerCase()) || p.id.toLowerCase().includes(search.toLowerCase())
   );
 
-  const mmSS = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 
   if (!pair) return (
     <div className="flex h-screen items-center justify-center bg-[#020617]">
@@ -200,14 +257,14 @@ export default function ChartPage({ params }: { params: Promise<{ pair: string }
   );
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[#020617]">
+    <div className="flex min-h-screen lg:h-screen lg:overflow-hidden bg-[#020617]">
       <Sidebar />
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col lg:overflow-hidden min-w-0">
         <TopBar />
-        <div className="flex-1 flex overflow-hidden">
+        <div className="flex-1 flex flex-col lg:flex-row lg:overflow-hidden">
 
           {/* ── Chart area ── */}
-          <div className="flex-1 flex flex-col p-4 gap-3 overflow-hidden min-w-0">
+          <div className="flex-1 flex flex-col p-3 lg:p-4 gap-3 lg:overflow-hidden min-w-0">
             {/* Toolbar */}
             <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
               {/* Pair selector */}
@@ -257,16 +314,19 @@ export default function ChartPage({ params }: { params: Promise<{ pair: string }
 
               <div className="flex-1" />
 
-              {/* Auto-refresh timer */}
-              <div className="flex items-center gap-1.5 bg-white/3 border border-white/8 rounded-xl px-3 py-1.5">
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                <span className="text-xs font-mono text-slate-400">{mmSS(countdown)}</span>
-                <button onClick={() => { fetchData(); setCountdown(30); }}
-                  className="ml-1 text-slate-500 hover:text-slate-300 transition-colors cursor-pointer" title="Refresh now">
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                </button>
+              {/* Live indicator */}
+              <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-medium transition-all ${
+                isLive
+                  ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                  : 'bg-white/3 border-white/8 text-slate-400'
+              }`}>
+                <div className={`w-1.5 h-1.5 rounded-full ${isLive ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
+                <span>{isLive ? 'LIVE' : pair.market === 'crypto' ? 'Connecting…' : '60s poll'}</span>
+                {livePrice && (
+                  <span className="font-mono ml-1 text-white">
+                    {pair.market === 'crypto' ? livePrice.toFixed(2) : livePrice.toFixed(5)}
+                  </span>
+                )}
               </div>
 
               {/* Chart style picker */}
@@ -291,7 +351,7 @@ export default function ChartPage({ params }: { params: Promise<{ pair: string }
             </div>
 
             {/* Chart */}
-            <div className="flex-1 bg-white/2 border border-white/8 rounded-2xl overflow-hidden">
+            <div className="flex-1 min-h-[55vh] lg:min-h-0 bg-white/2 border border-white/8 rounded-2xl overflow-hidden">
               <LiveChart
                 pair={pair}
                 levels={tradeType === 'auto' ? levels : forcedLevels}
@@ -305,11 +365,11 @@ export default function ChartPage({ params }: { params: Promise<{ pair: string }
             </div>
           </div>
 
-          {/* ── Right panel ── */}
-          <div className="w-[280px] flex-shrink-0 border-l border-white/5 flex flex-col bg-slate-900/40">
+          {/* ── Right panel — stacks below chart on mobile ── */}
+          <div className="w-full lg:w-[280px] flex-shrink-0 border-t lg:border-t-0 lg:border-l border-white/5 flex flex-col bg-slate-900/40">
             {/* Tabs */}
             <div className="flex border-b border-white/5 flex-shrink-0">
-              {([['signal', 'Signal'], ['strategy', 'Strategies'], ['trade', 'Trade']] as [Tab, string][]).map(([t, label]) => (
+              {([['signal', 'Signal'], ['strategy', 'Strats'], ['trade', 'Trade'], ['alerts', 'Alerts']] as [Tab, string][]).map(([t, label]) => (
                 <button key={t} onClick={() => setTab(t)}
                   className={`flex-1 py-3 text-xs font-medium cursor-pointer transition-all duration-150 border-b-2 ${
                     tab === t
@@ -364,13 +424,15 @@ export default function ChartPage({ params }: { params: Promise<{ pair: string }
                   loading={backtestLoading || ohlcv.length < 40}
                   candles={ohlcv.length}
                 />
-              ) : (
+              ) : tab === 'trade' ? (
                 <ChartTradePanel
                   pair={pair}
                   signal={signal}
                   levels={tradeType === 'auto' ? levels : forcedLevels}
                   livePrice={livePrice}
                 />
+              ) : (
+                <PriceAlerts pair={pair} livePrice={livePrice} />
               )}
             </div>
           </div>

@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import Sidebar from '@/components/layout/Sidebar';
 import DemoPortfolio from '@/components/demo/DemoPortfolio';
 import DemoTradeForm from '@/components/demo/DemoTradeForm';
 import OpenPositions from '@/components/demo/OpenPositions';
@@ -24,7 +25,9 @@ export default function DemoPage() {
   const [activeTab, setActiveTab] = useState<TabId>('portfolio');
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white p-4 md:p-6 space-y-4">
+    <div className="flex min-h-screen bg-slate-950">
+      <Sidebar />
+      <div className="flex-1 min-w-0 text-white p-4 md:p-6 pt-16 lg:pt-6 space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -72,6 +75,7 @@ export default function DemoPage() {
         {activeTab === 'journal' && <TradeJournal />}
         {activeTab === 'analysis' && <PerformanceAnalysis />}
         {activeTab === 'leaderboard' && <DemoLeaderboard />}
+      </div>
       </div>
     </div>
   );

@@ -11,10 +11,10 @@ export default function DashboardPage() {
   return (
     <div className="flex h-screen overflow-hidden bg-[#020617]">
       <Sidebar />
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col overflow-hidden min-w-0">
         <TopBar />
         <NewsWarningBanner />
-        <main className="flex-1 overflow-y-auto p-5">
+        <main className="flex-1 overflow-y-auto p-4 lg:p-5">
           <div className="max-w-screen-2xl mx-auto space-y-5">
             <div>
               <h1 className="text-2xl font-bold text-white mb-1">
