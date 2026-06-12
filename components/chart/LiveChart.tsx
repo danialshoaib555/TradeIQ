@@ -105,6 +105,22 @@ export default function LiveChart({ pair, levels, signal, tradeType = 'auto', se
   const [livePrice, setLivePrice] = useState<number | null>(null);
   const [priceChange, setPriceChange] = useState<number>(0);
 
+  // ── Drawing tools state ──
+  const [hlineMode, setHlineMode] = useState(false);
+  const hlineModeRef = useRef(false);
+  const [fibOn, setFibOn] = useState(false);
+  const [srOn,  setSrOn]  = useState(false);
+  const userLinesRef = useRef<number[]>([]);     // user-drawn horizontal line prices
+  const [drawVersion, setDrawVersion] = useState(0); // bump to force chart redraw
+
+  useEffect(() => { hlineModeRef.current = hlineMode; }, [hlineMode]);
+
+  const clearDrawings = () => {
+    userLinesRef.current = [];
+    setFibOn(false); setSrOn(false); setHlineMode(false);
+    setDrawVersion(v => v + 1);
+  };
+
   useEffect(() => {
     setReady(false);
     setOhlcv([]);
@@ -305,6 +321,68 @@ export default function LiveChart({ pair, levels, signal, tradeType = 'auto', se
           line(levels.tp3,   '#16A34A', 'TP3');
         }
 
+        // ── Drawing tools ─────────────────────────────────────────────────
+        // User-drawn horizontal lines (click-to-place)
+        for (const p of userLinesRef.current) {
+          mainSeries.createPriceLine({ price: p, color: '#94A3B8', lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: 'Line' });
+        }
+
+        // Auto Fibonacci retracement — swing high/low of the last 100 bars
+        if (fibOn && sorted.length >= 20) {
+          const win = sorted.slice(-100);
+          const hi = Math.max(...win.map(b => b.high));
+          const lo = Math.min(...win.map(b => b.low));
+          const range = hi - lo;
+          if (range > 0) {
+            const fibs: [number, string][] = [
+              [0, '0'], [0.236, '23.6'], [0.382, '38.2'], [0.5, '50'], [0.618, '61.8'], [0.786, '78.6'], [1, '100'],
+            ];
+            for (const [ratio, label] of fibs) {
+              mainSeries.createPriceLine({
+                price: hi - range * ratio,
+                color: ratio === 0.5 ? 'rgba(251,191,36,0.9)' : 'rgba(251,191,36,0.45)',
+                lineWidth: 1, lineStyle: ratio === 0 || ratio === 1 ? 0 : 3,
+                axisLabelVisible: true, title: `Fib ${label}`,
+              });
+            }
+          }
+        }
+
+        // Auto Support/Resistance — swing points of the last 150 bars
+        if (srOn && sorted.length >= 30) {
+          const win = sorted.slice(-150);
+          const swings: { price: number; type: 'S' | 'R' }[] = [];
+          const W = 5; // pivot window
+          for (let i = W; i < win.length - W; i++) {
+            const isHigh = win.slice(i - W, i + W + 1).every(b => b.high <= win[i].high);
+            const isLow  = win.slice(i - W, i + W + 1).every(b => b.low  >= win[i].low);
+            if (isHigh) swings.push({ price: win[i].high, type: 'R' });
+            if (isLow)  swings.push({ price: win[i].low,  type: 'S' });
+          }
+          // De-duplicate nearby levels (within 0.3% of each other), keep most recent few
+          const dedup: { price: number; type: 'S' | 'R' }[] = [];
+          for (const s of swings.reverse()) {
+            if (!dedup.some(d => Math.abs(d.price - s.price) / s.price < 0.003)) dedup.push(s);
+          }
+          for (const s of dedup.slice(0, 6)) {
+            mainSeries.createPriceLine({
+              price: s.price,
+              color: s.type === 'R' ? 'rgba(248,113,113,0.55)' : 'rgba(52,211,153,0.55)',
+              lineWidth: 1, lineStyle: 3, axisLabelVisible: true,
+              title: s.type === 'R' ? 'Res' : 'Sup',
+            });
+          }
+        }
+
+        // Click-to-draw horizontal line
+        chart.subscribeClick((param: { point?: { x: number; y: number } }) => {
+          if (!hlineModeRef.current || !param.point || !mainSeries) return;
+          const price = mainSeries.coordinateToPrice(param.point.y);
+          if (price == null || !isFinite(price)) return;
+          userLinesRef.current.push(price);
+          mainSeries.createPriceLine({ price, color: '#94A3B8', lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: 'Line' });
+        });
+
         // ── Backtest markers ──────────────────────────────────────────────
         if (LWC.createSeriesMarkers) {
           const allMarkers: unknown[] = [];
@@ -457,7 +535,7 @@ export default function LiveChart({ pair, levels, signal, tradeType = 'auto', se
       chart = null; mainSeries = null;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, ohlcv, levels, signal, selectedStrategy, backtestTrades, tradeType, chartStyle]);
+  }, [ready, ohlcv, levels, signal, selectedStrategy, backtestTrades, tradeType, chartStyle, fibOn, srOn, drawVersion]);
 
   const isLong  = tradeType === 'long'  || (tradeType === 'auto' && signal?.signal === 'BUY');
   const isShort = tradeType === 'short' || (tradeType === 'auto' && signal?.signal === 'SELL');
@@ -485,6 +563,44 @@ export default function LiveChart({ pair, levels, signal, tradeType = 'auto', se
               {isLong ? '↑ LONG' : '↓ SHORT'}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Drawing toolbar */}
+      <div className="absolute top-3 right-16 z-20 flex items-center gap-1 bg-slate-900/90 border border-white/10 rounded-xl p-1 backdrop-blur-sm shadow-lg">
+        <button onClick={() => setHlineMode(v => !v)} title="Horizontal line — click chart to place"
+          className={`w-8 h-8 flex items-center justify-center rounded-lg text-xs transition-all cursor-pointer ${
+            hlineMode ? 'bg-sky-500/25 text-sky-300 border border-sky-500/40' : 'text-slate-400 hover:text-white hover:bg-white/5'
+          }`}>
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeWidth={2} d="M4 12h16" />
+            <circle cx="4" cy="12" r="1.5" fill="currentColor" /><circle cx="20" cy="12" r="1.5" fill="currentColor" />
+          </svg>
+        </button>
+        <button onClick={() => setFibOn(v => !v)} title="Fibonacci retracement (auto from swing high/low)"
+          className={`w-8 h-8 flex items-center justify-center rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+            fibOn ? 'bg-amber-500/25 text-amber-300 border border-amber-500/40' : 'text-slate-400 hover:text-white hover:bg-white/5'
+          }`}>
+          Fib
+        </button>
+        <button onClick={() => setSrOn(v => !v)} title="Auto support & resistance levels"
+          className={`w-8 h-8 flex items-center justify-center rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+            srOn ? 'bg-emerald-500/25 text-emerald-300 border border-emerald-500/40' : 'text-slate-400 hover:text-white hover:bg-white/5'
+          }`}>
+          S/R
+        </button>
+        <button onClick={clearDrawings} title="Clear all drawings"
+          className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-red-400 hover:bg-white/5 transition-all cursor-pointer">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+          </svg>
+        </button>
+      </div>
+
+      {/* H-line mode hint */}
+      {hlineMode && (
+        <div className="absolute top-14 right-16 z-20 bg-sky-500/15 border border-sky-500/30 rounded-lg px-2.5 py-1.5 text-xs text-sky-300 backdrop-blur-sm">
+          Click anywhere on the chart to place a line
         </div>
       )}
 

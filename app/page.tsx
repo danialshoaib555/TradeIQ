@@ -6,10 +6,12 @@ import SessionClock from '@/components/tools/SessionClock';
 import MetricCards from '@/components/dashboard/MetricCards';
 import NewsPanel from '@/components/news/NewsPanel';
 import WhaleTracker from '@/components/whales/WhaleTracker';
+import GuidedTour from '@/components/tour/GuidedTour';
 
 export default function DashboardPage() {
   return (
     <div className="flex h-screen overflow-hidden bg-[#020617]">
+      <GuidedTour />
       <Sidebar />
       <div className="flex-1 flex flex-col overflow-hidden min-w-0">
         <TopBar />
