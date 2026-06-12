@@ -1,6 +1,7 @@
 'use client';
 import { useDemoStore } from '@/store/useDemoStore';
 import { calcStats } from '@/lib/demo/performanceStats';
+import { getDailyStats } from '@/lib/tradeQuality';
 
 export default function DemoPortfolio() {
   const { balance, equity, trades, equityCurve, resetAccount } = useDemoStore();
@@ -26,6 +27,9 @@ export default function DemoPortfolio() {
           color={stats.totalPnl >= 0 ? 'green' : 'red'} />
       </div>
 
+      {/* Today's discipline */}
+      <DisciplineCard />
+
       {/* Stats row */}
       <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
         <StatBox label="Win Rate" value={`${stats.winRate.toFixed(1)}%`} />
@@ -50,6 +54,62 @@ export default function DemoPortfolio() {
           className="text-xs text-slate-500 hover:text-red-400 transition-colors px-3 py-1.5 border border-white/5 rounded-lg hover:border-red-500/20">
           Reset Account
         </button>
+      </div>
+    </div>
+  );
+}
+
+function DisciplineCard() {
+  const { trades, balance } = useDemoStore();
+  const daily = getDailyStats(trades, balance);
+  const lossPct = Math.min(daily.dailyLossPct, 5);
+  const limitUsed = (lossPct / 5) * 100;
+
+  return (
+    <div className="bg-slate-800/40 rounded-xl p-4 border border-white/5">
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-xs font-semibold text-slate-400">Today&apos;s Discipline</p>
+        <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${
+          daily.dailyLossPct >= 5
+            ? 'text-red-400 bg-red-500/10 border-red-500/25'
+            : daily.consecutiveLosses >= 3
+              ? 'text-amber-400 bg-amber-500/10 border-amber-500/25'
+              : 'text-emerald-400 bg-emerald-500/10 border-emerald-500/25'
+        }`}>
+          {daily.dailyLossPct >= 5 ? 'STOP TRADING' : daily.consecutiveLosses >= 3 ? 'TAKE A BREAK' : 'ON TRACK'}
+        </span>
+      </div>
+      <div className="grid grid-cols-3 gap-3 mb-3">
+        <div>
+          <p className="text-xs text-slate-500">Today&apos;s P&L</p>
+          <p className={`text-sm font-bold font-mono ${daily.todayPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+            {daily.todayPnl >= 0 ? '+' : ''}${daily.todayPnl.toFixed(2)}
+          </p>
+        </div>
+        <div>
+          <p className="text-xs text-slate-500">Trades today</p>
+          <p className="text-sm font-bold font-mono text-white">{daily.tradesToday}</p>
+        </div>
+        <div>
+          <p className="text-xs text-slate-500">Loss streak</p>
+          <p className={`text-sm font-bold font-mono ${daily.consecutiveLosses >= 3 ? 'text-red-400' : 'text-white'}`}>
+            {daily.consecutiveLosses}
+          </p>
+        </div>
+      </div>
+      {/* Daily loss limit bar — prop firm style */}
+      <div>
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-xs text-slate-600">Daily loss limit (5%)</span>
+          <span className={`text-xs font-mono ${limitUsed >= 100 ? 'text-red-400' : limitUsed >= 60 ? 'text-amber-400' : 'text-slate-500'}`}>
+            {daily.dailyLossPct.toFixed(1)}% / 5%
+          </span>
+        </div>
+        <div className="h-1.5 bg-slate-700/60 rounded-full overflow-hidden">
+          <div className={`h-full rounded-full transition-all ${
+            limitUsed >= 100 ? 'bg-red-500' : limitUsed >= 60 ? 'bg-amber-500' : 'bg-emerald-500'
+          }`} style={{ width: `${limitUsed}%` }} />
+        </div>
       </div>
     </div>
   );

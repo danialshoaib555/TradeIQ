@@ -4,6 +4,7 @@ import { useDemoStore, type TradeDirection, type EmotionTag } from '@/store/useD
 import type { SignalResult } from '@/lib/signalEngine';
 import type { TradeLevels } from '@/lib/levelCalculator';
 import type { Pair } from '@/lib/pairConfig';
+import { scoreTradeQuality, getDailyStats } from '@/lib/tradeQuality';
 
 interface Props {
   pair: Pair;
@@ -71,10 +72,25 @@ export default function ChartTradePanel({ pair, signal, levels, livePrice }: Pro
   // Effective risk = user's risk input (capped at slLoss), or slLoss if not set
   const effectiveRisk = riskParsed > 0 ? Math.min(riskParsed, slLoss) : slLoss;
 
-  const canExecute = entryVal > 0 && slVal > 0 && tpVal > 0 && allocParsed > 0;
-
   const signalDir: TradeDirection = signal?.signal === 'SELL' ? 'SHORT' : 'LONG';
   const confidence = signal?.confidence ?? 0;
+
+  // ── Discipline layer: daily stats + trade quality grade ──
+  const daily = getDailyStats(trades, balance);
+  const dailyLimitHit = daily.dailyLossPct >= 5;
+  const [overrideGuard, setOverrideGuard] = useState(false);
+
+  const quality = scoreTradeQuality({
+    signal,
+    direction,
+    rr,
+    riskPctOfBalance: balance > 0 ? (effectiveRisk / balance) * 100 : 0,
+    dailyLossPct: daily.dailyLossPct,
+    consecutiveLosses: daily.consecutiveLosses,
+  });
+
+  const canExecute = entryVal > 0 && slVal > 0 && tpVal > 0 && allocParsed > 0
+    && (!dailyLimitHit || overrideGuard);
 
   const execute = () => {
     if (!canExecute) return;
@@ -337,6 +353,63 @@ export default function ChartTradePanel({ pair, signal, levels, livePrice }: Pro
           {EMOTIONS.map(em => <option key={em.value} value={em.value}>{em.label}</option>)}
         </select>
       </div>
+
+      {/* ── Trade Quality Grade ── */}
+      {entryVal > 0 && slVal > 0 && tpVal > 0 && (
+        <div className={`rounded-xl border p-3 space-y-2 ${
+          quality.score >= 85 ? 'bg-emerald-500/5 border-emerald-500/25'
+          : quality.score >= 55 ? 'bg-amber-500/5 border-amber-500/20'
+          : 'bg-red-500/5 border-red-500/25'
+        }`}>
+          <div className="flex items-center gap-3">
+            <div className={`w-11 h-11 rounded-xl flex items-center justify-center text-lg font-black border ${
+              quality.score >= 85 ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+              : quality.score >= 55 ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+              : 'bg-red-500/15 text-red-400 border-red-500/30'
+            }`}>
+              {quality.grade}
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-white">Setup Quality: {quality.score}/100</p>
+              <p className="text-xs text-slate-400 leading-snug">{quality.verdict}</p>
+            </div>
+          </div>
+          {/* Failed checks only — keep it scannable */}
+          {quality.checks.filter(c => !c.passed).length > 0 && (
+            <div className="space-y-1 pt-1 border-t border-white/5">
+              {quality.checks.filter(c => !c.passed).map(c => (
+                <div key={c.id} className="flex items-start gap-1.5 text-xs">
+                  <svg className="w-3 h-3 text-red-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                  <span className="text-slate-400">{c.detail}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Daily loss guard ── */}
+      {dailyLimitHit && (
+        <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3 space-y-2">
+          <div className="flex items-center gap-2">
+            <svg className="w-4 h-4 text-red-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <p className="text-xs font-bold text-red-400">Daily loss limit reached (−{daily.dailyLossPct.toFixed(1)}%)</p>
+          </div>
+          <p className="text-xs text-slate-400">
+            Prop firms cut traders off here. The best thing you can do right now is stop and come back tomorrow.
+          </p>
+          {!overrideGuard && (
+            <button onClick={() => setOverrideGuard(true)}
+              className="text-xs text-slate-500 hover:text-red-400 underline transition-colors cursor-pointer">
+              Trade anyway (not recommended)
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Execute */}
       <button onClick={execute} disabled={!canExecute}

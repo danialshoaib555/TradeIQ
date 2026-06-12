@@ -16,11 +16,20 @@ export default function DashboardPage() {
         <NewsWarningBanner />
         <main className="flex-1 overflow-y-auto p-4 lg:p-5">
           <div className="max-w-screen-2xl mx-auto space-y-5">
-            <div>
-              <h1 className="text-2xl font-bold text-white mb-1">
-                Trade<span className="text-emerald-400">IQ</span> Dashboard
-              </h1>
-              <p className="text-slate-500 text-sm">Live signals · {new Date().toLocaleDateString('en-US', {weekday:'long', year:'numeric', month:'long', day:'numeric'})}</p>
+            <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+              <div>
+                <h1 className="text-2xl lg:text-3xl font-bold text-white mb-1 tracking-tight">
+                  Trade<span className="bg-gradient-to-r from-emerald-400 to-teal-300 bg-clip-text text-transparent">IQ</span> Dashboard
+                </h1>
+                <p className="text-slate-500 text-sm">Live signals · {new Date().toLocaleDateString('en-US', {weekday:'long', year:'numeric', month:'long', day:'numeric'})}</p>
+              </div>
+              <a href="/demo"
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold bg-gradient-to-r from-emerald-500/20 to-teal-500/15 text-emerald-400 border border-emerald-500/30 hover:from-emerald-500/30 hover:to-teal-500/25 transition-all glow-emerald cursor-pointer w-fit">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+                Practice Trading — $10K Demo
+              </a>
             </div>
             <MetricCards />
             <div className="grid grid-cols-1 xl:grid-cols-5 gap-5">
